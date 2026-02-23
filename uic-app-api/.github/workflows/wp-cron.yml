@@ -1,1 +1,52 @@
+name: WP Cron - New Posts Notify
 
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Read state
+        run: |
+          if [ ! -f state.json ]; then
+            echo '{"lastNotifiedId":0}' > state.json
+          fi
+          cat state.json
+
+      - name: Fetch latest post id
+        run: |
+          curl -s "https://uic-campana.com.ar/wp-json/wp/v2/posts?per_page=1&orderby=date&order=desc" > latest.json
+          LATEST_ID=$(python -c "import json; print(json.load(open('latest.json'))[0]['id'])")
+          echo "LATEST_ID=$LATEST_ID" >> $GITHUB_ENV
+
+      - name: Compare and notify
+        env:
+          API_URL: ${{ secrets.API_URL }}
+          CRON_TOKEN: ${{ secrets.CRON_TOKEN }}
+        run: |
+          LAST_ID=$(python -c "import json; print(json.load(open('state.json'))['lastNotifiedId'])")
+          if [ "${{ env.LATEST_ID }}" -le "$LAST_ID" ]; then
+            echo "No new posts"
+            exit 0
+          fi
+
+          TITLE=$(python -c "import json; print(json.load(open('latest.json'))[0]['title']['rendered'].replace('"','\\"'))")
+          LINK=$(python -c "import json; print(json.load(open('latest.json'))[0]['link'])")
+
+          echo "{"lastNotifiedId":${{ env.LATEST_ID }}}" > state.json
+
+          curl -s -X POST "$API_URL/notify/new-posts"             -H "Content-Type: application/json"             -H "x-cron-token: $CRON_TOKEN"             -d "{"title":"$TITLE","url":"$LINK","category":"UIC"}"             | cat
+
+      - name: Commit state
+        run: |
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
+          git add state.json
+          git commit -m "Update state.json" || echo "No changes"
+          git push
