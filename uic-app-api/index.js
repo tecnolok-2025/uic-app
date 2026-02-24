@@ -18,6 +18,30 @@ app.get("/", (_req, res) => {
 const WP_BASE =
   process.env.WP_BASE || "https://uic-campana.com.ar/wp-json/wp/v2";
 
+// Optional: WP Basic Auth (recommended if your WP blocks public REST API).
+// Set ONE of:
+// - WP_AUTH_B64="base64(user:app_password)"
+// - WP_USER + WP_APP_PASSWORD
+function wpAuthHeader() {
+  const b64 = (process.env.WP_AUTH_B64 || "").trim();
+  if (b64) return `Basic ${b64}`;
+
+  const user = (process.env.WP_USER || "").trim();
+  const pass = (process.env.WP_APP_PASSWORD || "").trim();
+  if (user && pass) {
+    const token = Buffer.from(`${user}:${pass}`, "utf8").toString("base64");
+    return `Basic ${token}`;
+  }
+  return null;
+}
+
+function wpHeaders() {
+  const h = { Accept: "application/json" };
+  const auth = wpAuthHeader();
+  if (auth) h.Authorization = auth;
+  return h;
+}
+
 // Helpers: arma query string seguro
 function qs(params) {
   const usp = new URLSearchParams();
@@ -44,9 +68,7 @@ app.get("/wp/posts", async (req, res) => {
         categories,
       });
 
-    const r = await fetch(url, {
-      headers: { Accept: "application/json" },
-    });
+    const r = await fetch(url, { headers: wpHeaders() });
 
     const text = await r.text();
 
@@ -79,7 +101,7 @@ app.get("/wp/categories", async (req, res) => {
         hide_empty: "0",
       });
 
-    const r = await fetch(url, { headers: { Accept: "application/json" } });
+    const r = await fetch(url, { headers: wpHeaders() });
     const text = await r.text();
     res.status(r.status);
     res.setHeader("Content-Type", "application/json; charset=utf-8");
@@ -87,6 +109,21 @@ app.get("/wp/categories", async (req, res) => {
   } catch (e) {
     console.error("WP categories proxy error:", e?.message || e);
     return res.status(500).json({ error: "wp_categories_proxy_failed" });
+  }
+});
+
+// Diagnóstico rápido (útil para confirmar si WP responde o si pide auth)
+app.get("/wp/ping", async (_req, res) => {
+  try {
+    const url = `${WP_BASE}/posts` + qs({ per_page: "1" });
+    const r = await fetch(url, { headers: wpHeaders() });
+    const text = await r.text();
+    res.status(r.status);
+    res.setHeader("Content-Type", "application/json; charset=utf-8");
+    return res.send(text);
+  } catch (e) {
+    console.error("WP ping error:", e?.message || e);
+    return res.status(500).json({ error: "wp_ping_failed" });
   }
 });
 

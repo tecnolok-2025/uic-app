@@ -1,6 +1,8 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { fetchCategories, fetchPosts, pickFeaturedImage } from "./api/wp.js";
-import { enablePush } from "./api/push.js";
+// Push notifications (Web Push) are disabled in MVP v0.6 to simplify onboarding.
+// iOS requires: installed PWA + permission + valid VAPID keys.
+// We'll re-enable in a later iteration.
 
 const TABS = [
   { key: "inicio", label: "Inicio" },
@@ -78,16 +80,7 @@ export default function App() {
     }
   }
 
-  async function onEnablePush() {
-    try {
-      await Notification.requestPermission();
-      await enablePush({ categories: ["UIC"] });
-      setErr("");
-    } catch (e) {
-      console.error(e);
-      setErr("No se pudo activar push. Ver consola / configuración.");
-    }
-  }
+  // Push disabled in MVP
 
   if (selectedPost) {
     const img = pickFeaturedImage(selectedPost);
@@ -125,7 +118,7 @@ export default function App() {
           <h1 style={{margin:"8px 0"}}>UIC</h1>
           <div className="small">Campana</div>
         </div>
-        <button className="btn" onClick={onEnablePush}>Activar Push</button>
+        {/* Push disabled in MVP */}
       </div>
 
       {err ? (
