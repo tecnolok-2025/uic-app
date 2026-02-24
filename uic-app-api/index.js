@@ -2,6 +2,11 @@ import express from "express";
 import cors from "cors";
 import webpush from "web-push";
 import { XMLParser } from "fast-xml-parser";
+import fs from "fs";
+import path from "path";
+
+// En ESM no existe __dirname por defecto
+const __dirname = path.dirname(new URL(import.meta.url).pathname);
 
 /**
  * UIC Campana API (Node/Express)
@@ -61,6 +66,64 @@ const WP_AUTH_B64 = (process.env.WP_AUTH_B64 || "").trim();
 const VAPID_PUBLIC_KEY = (process.env.VAPID_PUBLIC_KEY || "").trim();
 const VAPID_PRIVATE_KEY = (process.env.VAPID_PRIVATE_KEY || "").trim();
 const VAPID_SUBJECT = (process.env.VAPID_SUBJECT || "mailto:admin@example.com").trim();
+
+/* ----------------------------- Agenda ---------------------------------- */
+
+// IMPORTANTE (Render Free): el filesystem puede ser efímero entre redeploys.
+// Para este MVP persistimos en un JSON local. Si más adelante querés DB real, se migra.
+const EVENTS_FILE = (process.env.EVENTS_FILE || path.join(__dirname, "data", "events.json")).trim();
+const EVENT_ADMIN_TOKEN = (process.env.EVENT_ADMIN_TOKEN || "").trim();
+
+function ensureDir(p) {
+  fs.mkdirSync(p, { recursive: true });
+}
+
+function readEventsStore() {
+  try {
+    const raw = fs.readFileSync(EVENTS_FILE, "utf-8");
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed?.events)) {
+      return {
+        events: parsed.events,
+        updatedAt: parsed.updatedAt || new Date().toISOString(),
+      };
+    }
+  } catch (_) {}
+  return { events: [], updatedAt: new Date().toISOString() };
+}
+
+function writeEventsStore(store) {
+  ensureDir(path.dirname(EVENTS_FILE));
+  fs.writeFileSync(EVENTS_FILE, JSON.stringify(store, null, 2), "utf-8");
+}
+
+let EVENTS_STORE = readEventsStore();
+
+function touchEventsStore() {
+  EVENTS_STORE.updatedAt = new Date().toISOString();
+  writeEventsStore(EVENTS_STORE);
+}
+
+function requireAdmin(req, res, next) {
+  if (!EVENT_ADMIN_TOKEN) {
+    return res.status(403).json({ error: "EVENT_ADMIN_TOKEN no configurado en el servidor." });
+  }
+  const t = (req.header("x-admin-token") || "").trim();
+  if (t !== EVENT_ADMIN_TOKEN) return res.status(401).json({ error: "No autorizado." });
+  next();
+}
+
+function isoDateOnly(s) {
+  if (typeof s !== "string") return null;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return null;
+  return s;
+}
+
+function inRange(d, from, to) {
+  if (from && d < from) return false;
+  if (to && d > to) return false;
+  return true;
+}
 
 /* ----------------------------- App ------------------------------------- */
 
@@ -217,6 +280,70 @@ app.get("/", (req, res) => {
 
 app.get("/health", (req, res) => res.json({ ok: true }));
 
+/* ----------------------------- Eventos --------------------------------- */
+
+app.get("/events/meta", (req, res) => {
+  return res.json({ updatedAt: EVENTS_STORE.updatedAt, count: EVENTS_STORE.events.length });
+});
+
+app.get("/events", (req, res) => {
+  const from = isoDateOnly((req.query.from || "").toString().trim());
+  const to = isoDateOnly((req.query.to || "").toString().trim());
+
+  const items = (EVENTS_STORE.events || [])
+    .filter((ev) => inRange(ev.date, from, to))
+    .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+
+  return res.json({ updatedAt: EVENTS_STORE.updatedAt, items });
+});
+
+app.post("/events", requireAdmin, (req, res) => {
+  const date = isoDateOnly(req.body?.date);
+  const title = (req.body?.title || "").toString().trim();
+  const description = (req.body?.description || "").toString().trim();
+  const highlight = Boolean(req.body?.highlight);
+
+  if (!date) return res.status(400).json({ error: "date inválida (formato: YYYY-MM-DD)" });
+  if (!title) return res.status(400).json({ error: "title requerido" });
+
+  const now = new Date().toISOString();
+  const id = `ev_${Math.random().toString(36).slice(2, 10)}${Date.now().toString(36)}`;
+  const ev = { id, date, title, description, highlight, createdAt: now, updatedAt: now };
+  EVENTS_STORE.events.unshift(ev);
+  touchEventsStore();
+  return res.status(201).json({ ok: true, item: ev, updatedAt: EVENTS_STORE.updatedAt });
+});
+
+app.put("/events/:id", requireAdmin, (req, res) => {
+  const id = (req.params.id || "").toString();
+  const idx = (EVENTS_STORE.events || []).findIndex((x) => x.id === id);
+  if (idx < 0) return res.status(404).json({ error: "Evento no encontrado" });
+
+  const date = req.body?.date ? isoDateOnly(req.body.date) : EVENTS_STORE.events[idx].date;
+  const title = req.body?.title !== undefined ? (req.body.title || "").toString().trim() : EVENTS_STORE.events[idx].title;
+  const description =
+    req.body?.description !== undefined
+      ? (req.body.description || "").toString().trim()
+      : EVENTS_STORE.events[idx].description;
+  const highlight = req.body?.highlight !== undefined ? Boolean(req.body.highlight) : EVENTS_STORE.events[idx].highlight;
+
+  if (!date) return res.status(400).json({ error: "date inválida (formato: YYYY-MM-DD)" });
+  if (!title) return res.status(400).json({ error: "title requerido" });
+
+  EVENTS_STORE.events[idx] = { ...EVENTS_STORE.events[idx], date, title, description, highlight, updatedAt: new Date().toISOString() };
+  touchEventsStore();
+  return res.json({ ok: true, item: EVENTS_STORE.events[idx], updatedAt: EVENTS_STORE.updatedAt });
+});
+
+app.delete("/events/:id", requireAdmin, (req, res) => {
+  const id = (req.params.id || "").toString();
+  const before = EVENTS_STORE.events.length;
+  EVENTS_STORE.events = (EVENTS_STORE.events || []).filter((x) => x.id !== id);
+  if (EVENTS_STORE.events.length === before) return res.status(404).json({ error: "Evento no encontrado" });
+  touchEventsStore();
+  return res.json({ ok: true, updatedAt: EVENTS_STORE.updatedAt });
+});
+
 /**
  * GET /wp/posts
  * Query:
@@ -225,15 +352,18 @@ app.get("/health", (req, res) => res.json({ ok: true }));
  * - category (slug)  -> beneficios | eventos | etc.
  */
 app.get("/wp/posts", async (req, res) => {
-  const perPage = Math.min(parseInt(req.query.per_page || "10", 10), 50);
+  const totalLimit = Math.min(parseInt(req.query.limit_total || "100", 10) || 100, 100);
+  const perPage = Math.min(parseInt(req.query.per_page || "10", 10) || 10, 50);
+  const page = Math.max(parseInt(req.query.page || "1", 10) || 1, 1);
   const search = (req.query.search || "").toString().trim().toLowerCase();
-  const category = (req.query.category || "").toString().trim().toLowerCase();
+  const category = (req.query.category || req.query.categories || "").toString().trim().toLowerCase();
 
   try {
     // ---- MODE REST (solo si NO está bloqueado) ----
     if (WP_MODE === "rest") {
       const params = new URLSearchParams();
       params.set("per_page", String(perPage));
+      params.set("page", String(page));
       if (search) params.set("search", search);
 
       // En REST, category es numérico; si nos pasan slug, intentamos resolverlo.
@@ -244,7 +374,10 @@ app.get("/wp/posts", async (req, res) => {
         if (found?.id) params.set("categories", String(found.id));
       }
 
-      const posts = await fetchJson(`${WP_BASE}/posts?${params.toString()}`);
+      // fetch directo para poder leer headers si hiciera falta en el futuro
+      const r = await fetch(`${WP_BASE}/posts?${params.toString()}`);
+      if (!r.ok) throw new Error(`WP REST posts failed: ${r.status} ${r.statusText}`);
+      const posts = await r.json();
       const normalized = (posts || []).map((p) => ({
         id: p.id,
         title: decodeHtml(p?.title?.rendered || ""),
@@ -254,7 +387,16 @@ app.get("/wp/posts", async (req, res) => {
         excerpt: decodeHtml((p?.excerpt?.rendered || "").replace(/<[^>]+>/g, "")).slice(0, 240).trim(),
         image: p?.yoast_head_json?.og_image?.[0]?.url || "",
       }));
-      return res.json({ mode: "rest", items: normalized });
+      const hasMore = page * perPage < totalLimit && (normalized || []).length === perPage;
+      return res.json({
+        mode: "rest",
+        page,
+        per_page: perPage,
+        limit_total: totalLimit,
+        has_more: hasMore,
+        next_page: hasMore ? page + 1 : null,
+        items: normalized,
+      });
     }
 
     // ---- MODE RSS (default) ----
@@ -265,7 +407,14 @@ app.get("/wp/posts", async (req, res) => {
       ? `${base}/category/${encodeURIComponent(category)}/feed/`
       : WP_FEED_URL;
 
-    let items = await fetchRssItems(feedUrl);
+    // RSS paginado (si WP lo soporta con ?paged=N)
+    const pageUrl = (() => {
+      const u = new URL(feedUrl);
+      u.searchParams.set("paged", String(page));
+      return u.toString();
+    })();
+
+    let items = await fetchRssItems(pageUrl);
 
     // Si WP no tiene /category/slug/feed/, cae a feed global y filtramos
     if (category && items.length === 0) {
@@ -280,7 +429,18 @@ app.get("/wp/posts", async (req, res) => {
 
     items = items.slice(0, perPage);
 
-    res.json({ mode: "rss", feed: feedUrl, items });
+    const hasMore = page * perPage < totalLimit && items.length === perPage;
+
+    res.json({
+      mode: "rss",
+      feed: pageUrl,
+      page,
+      per_page: perPage,
+      limit_total: totalLimit,
+      has_more: hasMore,
+      next_page: hasMore ? page + 1 : null,
+      items,
+    });
   } catch (e) {
     res.status(502).json({
       error: "wp_fetch_failed",

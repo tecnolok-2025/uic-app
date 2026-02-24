@@ -25,6 +25,23 @@ Setear env vars:
 - CRON_TOKEN
 - ALLOWED_ORIGINS
 
+## Agenda (eventos) — carga desde la app
+
+Endpoints:
+- `GET /events?from=YYYY-MM-DD&to=YYYY-MM-DD`
+- `GET /events/meta`
+- `POST /events` (requiere token)
+- `PUT /events/:id` (requiere token)
+- `DELETE /events/:id` (requiere token)
+
+### Env vars (Render)
+
+- `EVENT_ADMIN_TOKEN` = una clave que solo vos conozcas (se usa en el header `x-admin-token`).
+- (opcional) `EVENTS_FILE` = path del JSON de eventos (por defecto: `uic-app-api/data/events.json`).
+
+> Nota: en Render Free el filesystem puede resetearse en redeploy/dormir. Este MVP persiste en un JSON local.
+> Si necesitás persistencia 100% garantizada, pasamos a una DB (Supabase/Postgres) en la próxima etapa.
+
 ## GitHub Actions
 Configurar secrets en el repo:
 - API_URL = https://tu-api.onrender.com

@@ -195,8 +195,133 @@ a{color:inherit}
   font-weight:800;
   cursor:pointer;
   padding:10px 8px;
+  position:relative;
 }
 .navActive{
   color:var(--text);
   text-decoration:underline;
+}
+
+.navBadge{
+  position:absolute;
+  right:6px;
+  top:6px;
+  width:10px;
+  height:10px;
+  border-radius:50%;
+  background:#ff3b30;
+  box-shadow:0 0 0 2px rgba(9,27,48,0.95);
+}
+
+/* Pager publicaciones */
+.pagerRow{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:10px;
+  margin:10px 0;
+}
+.pagerInfo{
+  color:var(--muted);
+  font-size:13px;
+}
+
+/* Agenda / Calendario */
+.calWrap{
+  display:flex;
+  gap:12px;
+  overflow-x:auto;
+  padding-bottom:6px;
+}
+.calMonth{
+  min-width:320px;
+  background:rgba(255,255,255,0.04);
+  border:1px solid rgba(255,255,255,0.08);
+  border-radius:16px;
+  padding:12px;
+}
+.calHeader{
+  font-weight:900;
+  text-transform:capitalize;
+  margin-bottom:10px;
+}
+.calGrid{
+  display:grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap:6px;
+}
+.calCell{
+  border:0;
+  background:rgba(255,255,255,0.03);
+  border-radius:10px;
+  padding:10px 0;
+  text-align:center;
+  color:var(--text);
+}
+.calWeekdays .calCell{
+  background:transparent;
+  color:var(--muted);
+  font-weight:800;
+  padding:6px 0;
+}
+.calEmpty{
+  background:transparent;
+}
+.calDay{
+  cursor:pointer;
+  position:relative;
+}
+.calDay:hover{
+  background:rgba(255,255,255,0.06);
+}
+.calHas{
+  outline:2px solid rgba(255,59,48,0.35);
+}
+.calSel{
+  outline:2px solid rgba(255,255,255,0.25);
+}
+.calDot{
+  position:absolute;
+  right:8px;
+  top:8px;
+  width:8px;
+  height:8px;
+  border-radius:50%;
+  background:#ff3b30;
+}
+.eventsList{
+  display:flex;
+  flex-direction:column;
+  gap:8px;
+}
+.eventItem{
+  background:rgba(255,255,255,0.03);
+  border:1px solid rgba(255,255,255,0.08);
+  border-radius:12px;
+  padding:10px;
+}
+.eventHighlight{
+  border-color:rgba(255,59,48,0.45);
+}
+.eventTitle{
+  font-weight:900;
+}
+.eventDesc{
+  color:var(--muted);
+  margin-top:4px;
+  font-size:13px;
+}
+.eventForm{
+  display:flex;
+  flex-direction:column;
+  gap:8px;
+}
+.textarea{
+  width:100%;
+  background:rgba(255,255,255,0.03);
+  border:1px solid rgba(255,255,255,0.10);
+  color:var(--text);
+  border-radius:12px;
+  padding:10px 12px;
+  outline:none;
 }
