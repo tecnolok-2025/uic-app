@@ -16,3 +16,8 @@ a { color: inherit; }
 .tabBtn { background: transparent; border: none; color:#fff; font-weight: 600; cursor:pointer; opacity:0.85; }
 .tabBtn.active { opacity:1; text-decoration: underline; }
 img.thumb { width: 88px; height: 66px; object-fit: cover; border-radius: 10px; border: 1px solid rgba(255,255,255,0.12); }
+
+.badge{display:inline-flex;align-items:center;justify-content:center;margin-left:6px;min-width:18px;height:18px;padding:0 6px;border-radius:999px;background:#ff3b30;color:white;font-size:12px;font-weight:700;line-height:18px;}
+
+.modal{position:fixed;inset:0;background:rgba(0,0,0,.6);display:flex;align-items:flex-start;justify-content:center;padding:18px;z-index:50;overflow:auto;}
+.modalInner{background:#0f2f4f;border-radius:14px;max-width:720px;width:100%;padding:14px;border:1px solid rgba(255,255,255,.08);}

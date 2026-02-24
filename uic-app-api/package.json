@@ -1,7 +1,6 @@
 {
-  "name": "uic-campana-api",
-  "version": "1.0.0",
-  "description": "UIC Campana API - Clean version",
+  "name": "uic-app-api",
+  "version": "0.1.0",
   "type": "module",
   "main": "index.js",
   "scripts": {
@@ -9,7 +8,7 @@
   },
   "dependencies": {
     "cors": "^2.8.5",
-    "express": "^4.18.2",
-    "web-push": "^3.6.6"
+    "express": "^4.19.2",
+    "web-push": "^3.6.7"
   }
 }
