@@ -19,10 +19,3 @@ Están en `public/icons/`:
 
 ## Nota
 Este MVP consume publicaciones desde WordPress REST API.
-
-
-## Rev 1 (2026-02-24)
-- Agregado Service Worker custom para Push (iOS requiere instalar como app).
-- Fallback de publicaciones vía API proxy (/wp/*) para evitar problemas de CORS/WP.
-- Ajustes: configuración editable de API Base y WP Base (localStorage).
-- Badge rojo con cantidad de publicaciones nuevas (desde última lectura).

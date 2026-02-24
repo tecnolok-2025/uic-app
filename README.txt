@@ -1,4 +1,4 @@
-UIC APP v0.1 (Starter ZIP)
+UIC APP v0.2 (Starter ZIP)
 
 Incluye dos proyectos:
 - uic-app-pwa (frontend PWA React/Vite)
@@ -14,5 +14,5 @@ Uso recomendado:
    - PWA como Static Site
 4) Completar .env en PWA y env vars en API.
 
-Nota: En v0.1 la API guarda suscripciones en memoria (en Render Free se pierde al dormir).
+Nota: En v0.2 la API guarda suscripciones en memoria (en Render Free se pierde al dormir).
 En v0.2 se migra a persistencia (DB externa/free tier o plan pago).
