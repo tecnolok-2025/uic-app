@@ -5,6 +5,15 @@ import webpush from "web-push";
 const app = express();
 app.use(express.json({ limit: "1mb" }));
 
+// Página raíz (para que al abrir el dominio no parezca “roto”)
+app.get("/", (_req, res) => {
+  res
+    .type("text")
+    .send(
+      "UIC Campana API OK. Endpoints: /health, /wp/posts, /wp/categories, /vapid-public-key, /subscribe"
+    );
+});
+
 // --- WordPress proxy (evita problemas de CORS desde el frontend) ---
 const WP_BASE =
   process.env.WP_BASE || "https://uic-campana.com.ar/wp-json/wp/v2";
@@ -67,7 +76,7 @@ app.get("/wp/categories", async (req, res) => {
       qs({
         per_page,
         search,
-        categories,
+        hide_empty: "0",
       });
 
     const r = await fetch(url, { headers: { Accept: "application/json" } });

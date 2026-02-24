@@ -24,14 +24,24 @@ export default function App() {
   const [loading, setLoading] = useState(false);
   const [search, setSearch] = useState("");
   const [selectedPost, setSelectedPost] = useState(null);
-  const [apiBase, setApiBase] = useState(getApiBase());
-  const [wpBase, setWpBase] = useState(getWpBase());
-  const [settingsMsg, setSettingsMsg] = useState("");
+  const [err, setErr] = useState("");
+  const [filter, setFilter] = useState("all"); // all | beneficios | eventos
 
   const catIdBeneficios = useMemo(() => {
     const found = cats.find(c => (c.slug || "").includes("benef"));
     return found?.id || "";
   }, [cats]);
+
+  const catIdEventos = useMemo(() => {
+    const found = cats.find(c => (c.slug || "").includes("event"));
+    return found?.id || "";
+  }, [cats]);
+
+  const activeCategoryId = useMemo(() => {
+    if (filter === "beneficios") return catIdBeneficios;
+    if (filter === "eventos") return catIdEventos;
+    return "";
+  }, [filter, catIdBeneficios, catIdEventos]);
 
   useEffect(() => {
     (async () => {
@@ -48,44 +58,23 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (tab === "posts") loadPosts({ categoryId: "" });
+    // Carga por defecto también en Inicio.
+    if (tab === "inicio") loadPosts({ categoryId: activeCategoryId });
+    if (tab === "posts") loadPosts({ categoryId: activeCategoryId });
     if (tab === "beneficios") loadPosts({ categoryId: catIdBeneficios });
-  }, [tab, catIdBeneficios]);
+  }, [tab, catIdBeneficios, activeCategoryId]);
 
   async function loadPosts({ categoryId }) {
     setLoading(true);
+    setErr("");
     try {
       const data = await fetchPosts({ page: 1, perPage: 12, search, categoryId });
       setPosts(data.items);
     } catch (e) {
       console.error(e);
-      alert("No se pudo cargar publicaciones. Revisá conexión / WP API.");
+      setErr("No se pudo cargar publicaciones. Revisá conexión / WP API.");
     } finally {
       setLoading(false);
-    }
-  }
-
-  function saveSettings() {
-    try {
-      const api = (apiBase || "").trim().replace(/\/$/, "");
-      const wp = (wpBase || "").trim().replace(/\/$/, "");
-
-      if (api) localStorage.setItem("UIC_API_BASE", api);
-      else localStorage.removeItem("UIC_API_BASE");
-
-      if (wp) localStorage.setItem("UIC_WP_BASE", wp);
-      else localStorage.removeItem("UIC_WP_BASE");
-
-      setSettingsMsg("Guardado. Actualizando...");
-      // recargar publicaciones
-      setTimeout(() => {
-        setSettingsMsg("");
-        // volvemos a cargar categorías y posts
-        loadCategories();
-        loadPosts(1, "");
-      }, 300);
-    } catch (e) {
-      setSettingsMsg("No se pudo guardar la configuración.");
     }
   }
 
@@ -93,10 +82,10 @@ export default function App() {
     try {
       await Notification.requestPermission();
       await enablePush({ categories: ["UIC"] });
-      alert("Notificaciones activadas (si tu dispositivo lo soporta).");
+      setErr("");
     } catch (e) {
       console.error(e);
-      alert("No se pudo activar push. Ver consola / configuración.");
+      setErr("No se pudo activar push. Ver consola / configuración.");
     }
   }
 
@@ -139,15 +128,22 @@ export default function App() {
         <button className="btn" onClick={onEnablePush}>Activar Push</button>
       </div>
 
+      {err ? (
+        <div className="toast">
+          <span>{err}</span>
+          <button className="link" onClick={() => setErr("")}>Cerrar</button>
+        </div>
+      ) : null}
+
       {tab === "inicio" && (
         <>
           <div className="card">
             <div className="small">Accesos rápidos</div>
-            <div className="quickGrid">
-              <a className="quickTile" href="https://uic-campana.com.ar/hacete-socio/" target="_blank" rel="noreferrer"><span className="qtIcon">🤝</span><span>Hacete socio</span></a>
-              <a className="quickTile" href="https://uic-campana.com.ar/category/promocion-industrial/" target="_blank" rel="noreferrer"><span className="qtIcon">🏭</span><span>Promoción Industrial</span></a>
-              <a className="quickTile" href="https://uic-campana.com.ar/category/beneficios/" target="_blank" rel="noreferrer"><span className="qtIcon">🎁</span><span>Beneficios</span></a>
-              <a className="quickTile" href="https://uic-campana.com.ar/" target="_blank" rel="noreferrer"><span className="qtIcon">🌐</span><span>Sitio UIC</span></a>
+            <div className="grid" style={{marginTop:12}}>
+              <a className="tile" href="https://uic-campana.com.ar/hacete-socio/" target="_blank" rel="noreferrer">Hacete socio</a>
+              <a className="tile" href="https://uic-campana.com.ar/category/promocion-industrial/" target="_blank" rel="noreferrer">Promoción Industrial</a>
+              <a className="tile" href="https://uic-campana.com.ar/category/beneficios/" target="_blank" rel="noreferrer">Beneficios</a>
+              <a className="tile" href="https://uic-campana.com.ar/" target="_blank" rel="noreferrer">Sitio UIC</a>
             </div>
           </div>
 
@@ -157,28 +153,38 @@ export default function App() {
                 <strong>Últimas publicaciones</strong>
                 <div className="small">Lectura desde WordPress API</div>
               </div>
+
+	            <div className="row" style={{marginTop:12, gap:8}}>
+	              <input className="input" placeholder="Buscar publicaciones..." value={search} onChange={e => setSearch(e.target.value)} />
+	              <button className="btn" onClick={() => loadPosts({ categoryId: activeCategoryId })} disabled={loading}>{loading ? "..." : "Buscar"}</button>
+	            </div>
+
+	            <div className="pills" style={{marginTop:10}}>
+	              <button className={`pill ${filter === "all" ? "on" : ""}`} onClick={() => { setFilter("all"); loadPosts({ categoryId: "" }); }}>Todas</button>
+	              <button className={`pill ${filter === "beneficios" ? "on" : ""}`} onClick={() => { setFilter("beneficios"); loadPosts({ categoryId: catIdBeneficios }); }}>Beneficios</button>
+	              <button className={`pill ${filter === "eventos" ? "on" : ""}`} onClick={() => { setFilter("eventos"); loadPosts({ categoryId: catIdEventos }); }}>Eventos</button>
+	            </div>
               <button className="btn" onClick={() => { setTab("posts"); }}>Ver todas</button>
             </div>
 
-            <button className="btn" style={{marginTop:12}} onClick={() => loadPosts({ categoryId: "" })} disabled={loading}>
+	            <button className="btn" style={{marginTop:12}} onClick={() => loadPosts({ categoryId: activeCategoryId })} disabled={loading}>
               {loading ? "Cargando..." : "Actualizar"}
             </button>
 
-            <div className="carousel">{posts.slice(0, 10).map((p) => {
+            {posts.slice(0,5).map(p => {
               const img = pickFeaturedImage(p);
               return (
-                <div
-                  key={p.id}
-                  className="postMini"
-                  onClick={() => setSelectedPost(p)}
-                  style={{ cursor: "pointer" }}
-                >
-                  {img ? <img className="postMiniThumb" src={img} alt="" /> : null}
-                  <div className="postMiniTitle" dangerouslySetInnerHTML={{ __html: p.title.rendered }} />
+                <div key={p.id} className="card" onClick={() => setSelectedPost(p)} style={{cursor:"pointer"}}>
+                  <div className="row">
+                    {img ? <img className="thumb" src={img} alt="" /> : null}
+                    <div style={{flex:1}}>
+                      <div dangerouslySetInnerHTML={{__html: p.title?.rendered || ""}} />
+                      <div className="small">{new Date(p.date).toLocaleDateString("es-AR")} · {stripHtml(p.excerpt?.rendered || "").slice(0,120)}...</div>
+                    </div>
+                  </div>
                 </div>
               );
             })}
-            </div>
           </div>
         </>
       )}
@@ -187,10 +193,13 @@ export default function App() {
         <div className="card">
           <div className="row">
             <input className="input" placeholder="Buscar..." value={search} onChange={e => setSearch(e.target.value)} />
-            <button className="btn" onClick={() => loadPosts({ categoryId: "" })} disabled={loading}>{loading ? "..." : "Buscar"}</button>
+            <button className="btn" onClick={() => loadPosts({ categoryId: activeCategoryId })} disabled={loading}>{loading ? "..." : "Buscar"}</button>
           </div>
-          <div className="small" style={{marginTop:10}}>
-            Tip: luego mapeamos categorías exactas (Noticias, Revista, etc.) por slug.
+
+          <div className="pills" style={{marginTop:10}}>
+            <button className={`pill ${filter === "all" ? "on" : ""}`} onClick={() => { setFilter("all"); loadPosts({ categoryId: "" }); }}>Todas</button>
+            <button className={`pill ${filter === "beneficios" ? "on" : ""}`} onClick={() => { setFilter("beneficios"); loadPosts({ categoryId: catIdBeneficios }); }}>Beneficios</button>
+            <button className={`pill ${filter === "eventos" ? "on" : ""}`} onClick={() => { setFilter("eventos"); loadPosts({ categoryId: catIdEventos }); }}>Eventos</button>
           </div>
 
           {posts.map(p => {
@@ -245,46 +254,15 @@ export default function App() {
       {tab === "ajustes" && (
         <div className="card">
           <strong>Ajustes</strong>
-
-          <div className="small" style={{ marginTop: 8 }}>
-            Acá podés configurar las URLs sin volver a compilar la app.
+          <div className="small" style={{marginTop:8}}>
+            - Para instalar: “Agregar a pantalla de inicio” en el navegador del celular. <br/>
+            - Push: requiere permisos y soporte del sistema.
           </div>
-
-          <div className="formRow">
-            <label>API Base (backend Render)</label>
-            <input
-              className="input"
-              value={apiBase}
-              onChange={(e) => setApiBase(e.target.value)}
-              placeholder="https://uic-campana-api.onrender.com"
-            />
-            <div className="hint">Se usa para Push y para el proxy de publicaciones.</div>
-          </div>
-
-          <div className="formRow">
-            <label>WP Base (WordPress JSON)</label>
-            <input
-              className="input"
-              value={wpBase}
-              onChange={(e) => setWpBase(e.target.value)}
-              placeholder="https://TU-SITIO/wp-json/wp/v2"
-            />
-            <div className="hint">Si tu WordPress cambia de dominio, lo ajustás acá.</div>
-          </div>
-
-          <div style={{ display: "flex", gap: 10, marginTop: 12, flexWrap: "wrap" }}>
-            <button className="pill" onClick={saveSettings}>Guardar</button>
+          <div style={{marginTop:12}}>
             <a className="pill" href="https://uic-campana.com.ar/" target="_blank" rel="noreferrer">Abrir sitio</a>
-          </div>
-
-          {settingsMsg && <div className="small" style={{ marginTop: 10 }}>{settingsMsg}</div>}
-
-          <div className="small" style={{ marginTop: 12 }}>
-            Nota: para instalar en iPhone/Android, usar “Agregar a pantalla de inicio”.
           </div>
         </div>
       )}
-
 
       <div className="footerTabs">
         <div className="tabs">

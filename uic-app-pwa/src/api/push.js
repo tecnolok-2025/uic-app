@@ -1,12 +1,4 @@
-function getApiBase() {
-  try {
-    const ls = localStorage.getItem("UIC_API_BASE") || "";
-    const env = import.meta.env.VITE_API_BASE || "";
-    return (ls || env).replace(/\/$/, "");
-  } catch {
-    return (import.meta.env.VITE_API_BASE || "").replace(/\/$/, "");
-  }
-}
+const API = import.meta.env.VITE_API_BASE;
 
 function urlBase64ToUint8Array(base64String) {
   const padding = "=".repeat((4 - (base64String.length % 4)) % 4);
@@ -16,17 +8,15 @@ function urlBase64ToUint8Array(base64String) {
 }
 
 export async function enablePush(preferences = { categories: [] }) {
-  const API = getApiBase();
-  if (!API) throw new Error("Falta configurar la URL del backend (Ajustes → API Base).");
+  if (!API) throw new Error("Falta VITE_API_BASE (.env)");
   if (!("serviceWorker" in navigator)) throw new Error("Service Worker no disponible");
-  if (!("PushManager" in window)) throw new Error("Push no soportado en este navegador");
+  if (!("PushManager" in window)) throw new Error("PushManager no disponible");
 
   const reg = await navigator.serviceWorker.ready;
 
   const keyRes = await fetch(`${API}/vapid-public-key`);
-  if (!keyRes.ok) throw new Error("No se pudo obtener la clave pública (VAPID)");
+  if (!keyRes.ok) throw new Error("No se pudo obtener VAPID public key");
   const { publicKey } = await keyRes.json();
-  if (!publicKey) throw new Error("VAPID public key vacía");
 
   const subscription = await reg.pushManager.subscribe({
     userVisibleOnly: true,
@@ -39,7 +29,7 @@ export async function enablePush(preferences = { categories: [] }) {
     body: JSON.stringify({ subscription, preferences }),
   });
 
-  if (!res.ok) throw new Error("Falló la suscripción en el backend");
+  if (!res.ok) throw new Error("Falló subscribe");
   return true;
 }
 
