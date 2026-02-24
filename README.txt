@@ -1,4 +1,4 @@
-UIC APP v0.2 (Starter ZIP)
+UIC APP v0.3 (Starter ZIP)
 
 Incluye dos proyectos:
 - uic-app-pwa (frontend PWA React/Vite)

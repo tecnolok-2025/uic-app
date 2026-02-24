@@ -1,0 +1,36 @@
+UIC APP v0.4 (FULL)
+
+Qué se corrigió/mejoró:
+1) INICIO: ahora muestra “Últimas publicaciones” como carrusel horizontal (deslizás con el dedo).
+2) INICIO: botones de accesos rápidos más chicos y estilo “app” (grilla).
+3) HEADER: se eliminó “— PWA v0.1” (queda solo “Campana”).
+4) PUBLICACIONES: se agrega proxy WordPress desde el backend para evitar bloqueos por CORS.
+   - Frontend ya NO depende de llamar directo al WordPress.
+5) AJUSTES: ahora permite configurar sin recompilar:
+   - API Base (backend Render)
+   - WP Base (WordPress JSON base)
+   Se guarda en localStorage (en el teléfono) y aplica al instante.
+6) PUSH: mejor manejo de error cuando falta API Base y uso de la configuración de Ajustes.
+
+IMPORTANTE – Render (Backend uic-campana-api):
+Variables de entorno (Environment):
+- ALLOWED_ORIGINS = https://uic-campana-app.onrender.com
+- VAPID_PUBLIC_KEY = (tu clave PUBLIC)
+- VAPID_PRIVATE_KEY = (tu clave PRIVATE)
+- VAPID_SUBJECT = mailto:tu-email@dominio.com   (ej: mailto:nestor.manucci@gmail.com)
+Opcional:
+- WP_BASE = https://TU-SITIO/wp-json/wp/v2
+
+IMPORTANTE – Render (Frontend uic-campana-app - Static Site):
+Si querés “hardcodearlo” por env:
+- VITE_API_BASE = https://uic-campana-api.onrender.com
+Opcional:
+- VITE_WP_BASE = https://TU-SITIO/wp-json/wp/v2
+
+Si no querés tocar env vars:
+- Abrí la app → pestaña “Ajustes” → completá API Base y (si aplica) WP Base → Guardar.
+
+Nota iPhone (Push):
+- Web Push en iOS funciona SOLO si la PWA está instalada (“Agregar a pantalla de inicio”)
+  y en iOS 16.4+.
+- Si falla, revisar que VAPID_* sea válido (claves completas, sin comillas ni espacios).

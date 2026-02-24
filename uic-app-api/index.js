@@ -5,6 +5,83 @@ import webpush from "web-push";
 const app = express();
 app.use(express.json({ limit: "1mb" }));
 
+// --- WordPress proxy (evita problemas de CORS desde el frontend) ---
+const WP_BASE =
+  process.env.WP_BASE || "https://uic-campana.com.ar/wp-json/wp/v2";
+
+// Helpers: arma query string seguro
+function qs(params) {
+  const usp = new URLSearchParams();
+  Object.entries(params || {}).forEach(([k, v]) => {
+    if (v === undefined || v === null || v === "") return;
+    usp.set(k, String(v));
+  });
+  const s = usp.toString();
+  return s ? `?${s}` : "";
+}
+
+// Proxy: posts
+app.get("/wp/posts", async (req, res) => {
+  try {
+    const { page = "1", per_page = "10", search = "", categories = "" } = req.query;
+
+    const url =
+      `${WP_BASE}/posts` +
+      qs({
+        _embed: "1",
+        page,
+        per_page,
+        search,
+        categories,
+      });
+
+    const r = await fetch(url, {
+      headers: { Accept: "application/json" },
+    });
+
+    const text = await r.text();
+
+    // Propaga status y headers útiles (paginación)
+    res.status(r.status);
+    ["x-wp-total", "x-wp-totalpages"].forEach((h) => {
+      const v = r.headers.get(h);
+      if (v) res.setHeader(h, v);
+    });
+
+    // si WP devuelve JSON válido, lo pasamos tal cual
+    res.setHeader("Content-Type", "application/json; charset=utf-8");
+    return res.send(text);
+  } catch (e) {
+    console.error("WP proxy error:", e?.message || e);
+    return res.status(500).json({ error: "wp_proxy_failed" });
+  }
+});
+
+// Proxy: categorías (por si después se usa para 'beneficios', 'eventos', etc.)
+app.get("/wp/categories", async (req, res) => {
+  try {
+    const { per_page = "100", search = "" } = req.query;
+
+    const url =
+      `${WP_BASE}/categories` +
+      qs({
+        per_page,
+        search,
+        categories,
+      });
+
+    const r = await fetch(url, { headers: { Accept: "application/json" } });
+    const text = await r.text();
+    res.status(r.status);
+    res.setHeader("Content-Type", "application/json; charset=utf-8");
+    return res.send(text);
+  } catch (e) {
+    console.error("WP categories proxy error:", e?.message || e);
+    return res.status(500).json({ error: "wp_categories_proxy_failed" });
+  }
+});
+
+
 const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS || "")
   .split(",")
   .map(s => s.trim())
