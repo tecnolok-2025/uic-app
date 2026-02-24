@@ -1,0 +1,16 @@
+UIC APP v0.3 (ENV patch)
+
+Qué arregla esto:
+- Evita la confusión: VITE_API_BASE pertenece SOLO al FRONTEND.
+
+Cambios incluidos:
+1) Frontend (uic-app-pwa): agregado archivo .env.example con:
+   VITE_API_BASE=https://uic-campana-api.onrender.com
+
+Recordatorio de configuración en Render:
+- Backend (Web Service) uic-campana-api -> Environment:
+  ALLOWED_ORIGINS, VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY, VAPID_SUBJECT
+  (NO agregar VITE_API_BASE acá)
+
+- Frontend (Static Site) uic-campana-app -> Environment:
+  VITE_API_BASE=https://uic-campana-api.onrender.com
