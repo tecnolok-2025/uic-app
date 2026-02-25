@@ -99,6 +99,38 @@ function writeEventsStore(store) {
 
 let EVENTS_STORE = readEventsStore();
 
+/* ---------------------- Comunicación al socio (COMMS) ------------------- */
+
+// Almacena comunicaciones del admin hacia usuarios.
+// MVP: JSON local (Render Free puede resetear al dormir/redeploy).
+const COMMS_FILE = (process.env.COMMS_FILE || path.join(__dirname, "data", "comms.json")).trim();
+
+function readCommsStore() {
+  try {
+    const raw = fs.readFileSync(COMMS_FILE, "utf-8");
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed?.items)) {
+      return {
+        items: parsed.items,
+        updatedAt: parsed.updatedAt || new Date().toISOString(),
+      };
+    }
+  } catch (_) {}
+  return { items: [], updatedAt: new Date().toISOString() };
+}
+
+function writeCommsStore(store) {
+  ensureDir(path.dirname(COMMS_FILE));
+  fs.writeFileSync(COMMS_FILE, JSON.stringify(store, null, 2), "utf-8");
+}
+
+let COMMS_STORE = readCommsStore();
+
+function touchCommsStore() {
+  COMMS_STORE.updatedAt = new Date().toISOString();
+  writeCommsStore(COMMS_STORE);
+}
+
 function touchEventsStore() {
   EVENTS_STORE.updatedAt = new Date().toISOString();
   writeEventsStore(EVENTS_STORE);
@@ -342,6 +374,41 @@ app.delete("/events/:id", requireAdmin, (req, res) => {
   if (EVENTS_STORE.events.length === before) return res.status(404).json({ error: "Evento no encontrado" });
   touchEventsStore();
   return res.json({ ok: true, updatedAt: EVENTS_STORE.updatedAt });
+});
+
+/* -------------------- Comunicación al socio (COMMS) --------------------- */
+
+app.get("/comms/meta", (req, res) => {
+  return res.json({ updatedAt: COMMS_STORE.updatedAt, count: (COMMS_STORE.items || []).length });
+});
+
+app.get("/comms", (req, res) => {
+  const limit = Math.min(parseInt(req.query.limit || "10", 10) || 10, 50);
+  const items = (COMMS_STORE.items || []).slice(0, limit);
+  return res.json({ updatedAt: COMMS_STORE.updatedAt, items });
+});
+
+app.post("/comms", requireAdmin, (req, res) => {
+  const title = (req.body?.title || "").toString().trim();
+  const message = (req.body?.message || "").toString().trim();
+  if (!title) return res.status(400).json({ error: "title requerido" });
+  if (!message) return res.status(400).json({ error: "message requerido" });
+
+  const now = new Date().toISOString();
+  const id = `cm_${Math.random().toString(36).slice(2, 10)}${Date.now().toString(36)}`;
+  const item = { id, title, message, createdAt: now };
+  COMMS_STORE.items.unshift(item);
+  touchCommsStore();
+  return res.status(201).json({ ok: true, item, updatedAt: COMMS_STORE.updatedAt });
+});
+
+app.delete("/comms/:id", requireAdmin, (req, res) => {
+  const id = (req.params.id || "").toString();
+  const before = (COMMS_STORE.items || []).length;
+  COMMS_STORE.items = (COMMS_STORE.items || []).filter((x) => x.id !== id);
+  if ((COMMS_STORE.items || []).length === before) return res.status(404).json({ error: "Mensaje no encontrado" });
+  touchCommsStore();
+  return res.json({ ok: true, updatedAt: COMMS_STORE.updatedAt });
 });
 
 /**

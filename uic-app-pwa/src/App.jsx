@@ -55,10 +55,20 @@ export default function App() {
   // Agenda
   const [events, setEvents] = useState([]);
   const [eventsMeta, setEventsMeta] = useState({ updatedAt: null, count: 0 });
-  const [agendaBadge, setAgendaBadge] = useState(false);
+  const [todayEventsCount, setTodayEventsCount] = useState(0);
+  const [badgeCount, setBadgeCount] = useState(0);
+  const [agendaBase, setAgendaBase] = useState(() => {
+    const n = new Date();
+    return new Date(n.getFullYear(), n.getMonth(), 1);
+  });
   const [selectedDate, setSelectedDate] = useState(null);
   const [adminToken, setAdminToken] = useState(() => localStorage.getItem("uic_admin_token") || "");
   const isAdmin = Boolean(adminToken);
+
+  // Comunicación al socio
+  const [comms, setComms] = useState([]);
+  const [commsMeta, setCommsMeta] = useState({ updatedAt: null, count: 0 });
+  const [commsUnseen, setCommsUnseen] = useState(0);
 
   const canUseApi = useMemo(() => Boolean(API_BASE), []);
 
@@ -126,6 +136,12 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  useEffect(() => {
+    if (!canUseApi) return;
+    loadComms(10);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [canUseApi]);
+
   // Re-carga cuando cambia filtro o búsqueda en Publicaciones
   useEffect(() => {
     if (tab !== "publicaciones") return;
@@ -135,35 +151,89 @@ export default function App() {
 
   useEffect(() => {
     if (tab !== "agenda") return;
-    loadAgendaForTwoMonths(new Date());
+    loadAgendaForTwoMonths(agendaBase);
+    loadComms(10);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab]);
 
-  // Agenda: meta (para badge)
+  // Si el usuario entra a Agenda, consideramos vista la comunicación vigente.
+  useEffect(() => {
+    if (tab !== "agenda") return;
+    if (commsMeta?.updatedAt) markCommsSeen(commsMeta.updatedAt);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tab, commsMeta?.updatedAt]);
+
+  // Comunicación al socio: meta (para badge)
   useEffect(() => {
     if (!canUseApi) return;
     (async () => {
       try {
-        const meta = await apiGet("/events/meta");
-        setEventsMeta(meta);
-        const lastSeen = localStorage.getItem("uic_events_seen_at") || "";
-        if (meta?.updatedAt && meta.updatedAt !== lastSeen) setAgendaBadge(true);
+        const meta = await apiGet("/comms/meta");
+        setCommsMeta(meta);
+        const lastSeen = localStorage.getItem("uic_comms_seen_at") || "";
+        if (meta?.updatedAt && meta.updatedAt !== lastSeen) setCommsUnseen(1);
       } catch {
         // ignorar
       }
     })();
   }, [canUseApi]);
 
-  function markAgendaSeen(updatedAt) {
+  function markCommsSeen(updatedAt) {
     if (!updatedAt) return;
-    localStorage.setItem("uic_events_seen_at", updatedAt);
-    setAgendaBadge(false);
+    localStorage.setItem("uic_comms_seen_at", updatedAt);
+    setCommsUnseen(0);
+  }
+
+  // Eventos de HOY: badge numérico
+  useEffect(() => {
+    if (!canUseApi) return;
+    const tick = async () => {
+      try {
+        const today = new Date();
+        const d = today.toISOString().slice(0, 10);
+        const qs = new URLSearchParams();
+        qs.set("from", d);
+        qs.set("to", d);
+        const data = await apiGet(`/events?${qs.toString()}`);
+        setTodayEventsCount((data.items || []).length);
+      } catch {
+        // ignorar
+      }
+    };
+    tick();
+    const id = setInterval(tick, 10 * 60 * 1000); // cada 10 min
+    return () => clearInterval(id);
+  }, [canUseApi]);
+
+  // Badge total (Agenda + Comms)
+  useEffect(() => {
+    const total = (todayEventsCount || 0) + (commsUnseen || 0);
+    setBadgeCount(total);
+  }, [todayEventsCount, commsUnseen]);
+
+  // Intento de badge en ícono PWA (Android/Chrome). En iOS puede no estar disponible.
+  useEffect(() => {
+    try {
+      const n = badgeCount || 0;
+      if ("setAppBadge" in navigator) {
+        if (n > 0) navigator.setAppBadge(n);
+        else if ("clearAppBadge" in navigator) navigator.clearAppBadge();
+      }
+    } catch {
+      // ignorar
+    }
+  }, [badgeCount]);
+
+  function addMonths(d, n) {
+    return new Date(d.getFullYear(), d.getMonth() + n, 1);
   }
 
   async function loadAgendaForTwoMonths(baseDate = new Date()) {
     if (!canUseApi) return;
-    const y = baseDate.getFullYear();
-    const m = baseDate.getMonth();
+    const b = new Date(baseDate.getFullYear(), baseDate.getMonth(), 1);
+    setAgendaBase(b);
+    const y = b.getFullYear();
+    const m = b.getMonth();
     const from = new Date(y, m, 1);
     const to = new Date(y, m + 2, 0);
     const iso = (d) => d.toISOString().slice(0, 10);
@@ -172,7 +242,7 @@ export default function App() {
     qs.set("to", iso(to));
     const data = await apiGet(`/events?${qs.toString()}`);
     setEvents(data.items || []);
-    if (data.updatedAt) markAgendaSeen(data.updatedAt);
+    if (data.updatedAt) setEventsMeta({ updatedAt: data.updatedAt, count: (data.items || []).length });
   }
 
   async function createEvent({ date, title, description, highlight }) {
@@ -243,17 +313,19 @@ export default function App() {
           {days.map((dt, idx) => {
             if (!dt) return <div key={idx} className="calCell calEmpty" />;
             const dIso = iso(dt);
-            const has = getEventsForDate(dIso).length > 0;
+            const dayEvents = getEventsForDate(dIso);
+            const has = dayEvents.length > 0;
+            const hasHigh = dayEvents.some((e) => e.highlight);
             const isSel = selectedDate === dIso;
             return (
               <button
                 key={idx}
-                className={`calCell calDay ${has ? "calHas" : ""} ${isSel ? "calSel" : ""}`}
+                className={`calCell calDay ${has ? "calHas" : ""} ${hasHigh ? "calHigh" : ""} ${isSel ? "calSel" : ""}`}
                 onClick={() => setSelectedDate(dIso)}
                 title={has ? "Hay evento(s)" : ""}
               >
                 <span className="calNum">{dt.getDate()}</span>
-                {has && <span className="calDot" />}
+                {/* v0.11: sin puntito, se pinta la celda */}
               </button>
             );
           })}
@@ -313,6 +385,80 @@ export default function App() {
     );
   }
 
+  function CommCreateForm({ onPublish }) {
+    const [title, setTitle] = useState("");
+    const [message, setMessage] = useState("");
+    const [saving, setSaving] = useState(false);
+
+    async function submit() {
+      try {
+        setSaving(true);
+        await onPublish({ title, message });
+        setTitle("");
+        setMessage("");
+        alert("Comunicación publicada.");
+      } catch (e) {
+        alert(e?.message || "No se pudo publicar");
+      } finally {
+        setSaving(false);
+      }
+    }
+
+    return (
+      <div className="eventForm" style={{ marginTop: 10 }}>
+        <input className="input" placeholder="Título" value={title} onChange={(e) => setTitle(e.target.value)} />
+        <textarea
+          className="textarea"
+          placeholder="Mensaje para el socio"
+          value={message}
+          onChange={(e) => setMessage(e.target.value)}
+          rows={4}
+        />
+        <button className="btnPrimary" disabled={saving || !title.trim() || !message.trim()} onClick={submit}>
+          {saving ? "Publicando…" : "Publicar"}
+        </button>
+      </div>
+    );
+  }
+
+  async function loadComms(limit = 10) {
+    if (!canUseApi) return;
+    try {
+      const qs = new URLSearchParams();
+      qs.set("limit", String(limit));
+      const data = await apiGet(`/comms?${qs.toString()}`);
+      setComms(data.items || []);
+      if (data.updatedAt) {
+        setCommsMeta((m) => ({ ...m, updatedAt: data.updatedAt }));
+        const lastSeen = localStorage.getItem("uic_comms_seen_at") || "";
+        if (data.updatedAt !== lastSeen) setCommsUnseen(1);
+      }
+    } catch {
+      // ignorar
+    }
+  }
+
+  async function publishComm({ title, message }) {
+    if (!canUseApi) return;
+    const r = await fetch(`${API_BASE}/comms`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-admin-token": adminToken,
+      },
+      body: JSON.stringify({ title, message }),
+    });
+    if (!r.ok) {
+      const j = await r.json().catch(() => ({}));
+      throw new Error(j?.error || `Error ${r.status}`);
+    }
+    const j = await r.json();
+    setCommsMeta((m) => ({ ...m, updatedAt: j.updatedAt || m.updatedAt }));
+    await loadComms(10);
+    setCommsUnseen(0);
+    if (j.updatedAt) markCommsSeen(j.updatedAt);
+  }
+
   return (
     <div className="app">
       <header className="topbar">
@@ -365,9 +511,17 @@ export default function App() {
                   <div className="cardTitle">Últimas publicaciones</div>
                   <div className="cardSub">Lectura desde el feed público de WordPress</div>
                 </div>
-                <button className="btnPrimary" onClick={() => loadPosts({ perPage: 10 })}>
-                  Actualizar
-                </button>
+                <div className="row" style={{ gap: 8 }}>
+                  <button className="btnSecondary" disabled={postsPager.page <= 1} onClick={() => loadPosts({ perPage: 6, page: Math.max(1, postsPager.page - 1) })}>
+                    ◀
+                  </button>
+                  <button className="btnSecondary" disabled={!postsPager.has_more} onClick={() => loadPosts({ perPage: 6, page: postsPager.page + 1 })}>
+                    ▶
+                  </button>
+                  <button className="btnPrimary" onClick={() => loadPosts({ perPage: 6, page: 1 })}>
+                    Actualizar
+                  </button>
+                </div>
               </div>
 
               <div className="filterRow">
@@ -395,11 +549,15 @@ export default function App() {
                 </button>
               </div>
 
+              <div className="muted" style={{ marginTop: 6 }}>
+                Página {postsPager.page} / {Math.ceil((postsPager.limit_total || 100) / (postsPager.per_page || 6))}
+              </div>
+
               {loadingPosts ? (
                 <div className="muted">Cargando…</div>
               ) : (
                 <div className="cardsScroller">
-                  {homeCards.map((p) => (
+                  {posts.map((p) => (
                     <a key={p.id} className="postCard" href={p.link} target="_blank" rel="noreferrer">
                       {p.image ? <img className="postImg" src={p.image} alt="" /> : <div className="postImgPlaceholder" />}
                       <div className="postBody">
@@ -408,7 +566,7 @@ export default function App() {
                       </div>
                     </a>
                   ))}
-                  {homeCards.length === 0 && <div className="muted">No hay publicaciones disponibles.</div>}
+                  {posts.length === 0 && <div className="muted">No hay publicaciones disponibles.</div>}
                 </div>
               )}
             </section>
@@ -517,21 +675,85 @@ export default function App() {
             ) : (
               <>
                 <div className="muted" style={{ marginBottom: 8 }}>
-                  Se muestran <b>dos meses</b>. Tocá un día para ver/cargar un evento.
+                  Se muestran <b>dos meses</b>. Podés avanzar/retroceder de a 2 meses.
+                </div>
+
+                <div className="pagerRow" style={{ marginTop: 0 }}>
+                  <button
+                    className="btnSecondary"
+                    onClick={() => {
+                      const min = new Date(new Date().getFullYear() - 6, new Date().getMonth(), 1);
+                      const next = addMonths(agendaBase, -2);
+                      if (next < min) return;
+                      loadAgendaForTwoMonths(next);
+                    }}
+                  >
+                    ◀◀
+                  </button>
+                  <div className="pagerInfo">
+                    {(() => {
+                      const d1 = agendaBase;
+                      const d2 = addMonths(agendaBase, 1);
+                      const a = d1.toLocaleDateString("es-AR", { month: "long", year: "numeric" });
+                      const b = d2.toLocaleDateString("es-AR", { month: "long", year: "numeric" });
+                      return `${a} – ${b}`;
+                    })()}
+                  </div>
+                  <button
+                    className="btnSecondary"
+                    onClick={() => {
+                      const max = new Date(new Date().getFullYear() + 2, 11, 1);
+                      const next = addMonths(agendaBase, 2);
+                      if (next > max) return;
+                      loadAgendaForTwoMonths(next);
+                    }}
+                  >
+                    ▶▶
+                  </button>
                 </div>
 
                 <div className="calWrap">
                   {(() => {
-                    const now = new Date();
-                    const y = now.getFullYear();
-                    const m = now.getMonth();
+                    const base = agendaBase;
+                    const y = base.getFullYear();
+                    const m = base.getMonth();
                     return (
                       <>
                         {renderMonth(y, m)}
-                        {renderMonth(y, m + 1)}
+                        {(() => {
+                          const d2 = addMonths(base, 1);
+                          return renderMonth(d2.getFullYear(), d2.getMonth());
+                        })()}
                       </>
                     );
                   })()}
+                </div>
+
+                {/* Comunicación al socio (debajo de agenda) */}
+                <div style={{ marginTop: 14 }}>
+                  <div className="rowBetween">
+                    <div>
+                      <div className="cardTitle">Comunicación al socio</div>
+                      <div className="cardSub">Mensajes institucionales publicados por el administrador.</div>
+                    </div>
+                    <button className="btnSecondary" onClick={() => loadComms(10)}>
+                      Actualizar
+                    </button>
+                  </div>
+
+                  {(() => {
+                    const latest = comms?.[0];
+                    if (!latest) return <div className="muted" style={{ marginTop: 8 }}>No hay comunicaciones publicadas.</div>;
+                    return (
+                      <div className="eventItem" style={{ marginTop: 10 }}>
+                        <div className="eventTitle">{latest.title}</div>
+                        <div className="muted" style={{ fontSize: 12, marginTop: 2 }}>{latest.createdAt?.slice(0, 10) || ""}</div>
+                        <div className="eventDesc" style={{ whiteSpace: "pre-wrap" }}>{latest.message}</div>
+                      </div>
+                    );
+                  })()}
+
+                  {isAdmin && <CommCreateForm onPublish={publishComm} />}
                 </div>
 
                 {selectedDate && (
@@ -620,7 +842,7 @@ export default function App() {
           Beneficios
         </button>
         <button className={cls("navBtn", tab === "agenda" && "navActive")} onClick={() => setTab("agenda")}>
-          Agenda {agendaBadge && <span className="navBadge" />}
+          Agenda {badgeCount > 0 && <span className="navBadgeNum">{badgeCount}</span>}
         </button>
         <button className={cls("navBtn", tab === "ajustes" && "navActive")} onClick={() => setTab("ajustes")}>
           Ajustes

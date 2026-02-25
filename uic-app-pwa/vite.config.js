@@ -11,7 +11,7 @@ export default defineConfig({
       manifest: {
         name: "UIC Campana",
         short_name: "UIC",
-        description: "Publicaciones y servicios UIC Campana",
+        description: "Publicaciones, agenda y comunicaciones UIC Campana",
         theme_color: "#0b2a4a",
         background_color: "#0b2a4a",
         display: "standalone",

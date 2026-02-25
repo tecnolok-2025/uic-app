@@ -275,19 +275,33 @@ a{color:inherit}
   background:rgba(255,255,255,0.06);
 }
 .calHas{
-  outline:2px solid rgba(255,59,48,0.35);
+  outline:none;
+  background:rgba(255,59,48,0.22);
+  border:1px solid rgba(255,59,48,0.28);
+}
+.calHigh{
+  background:rgba(255,59,48,0.32);
+  border-color:rgba(255,59,48,0.45);
 }
 .calSel{
   outline:2px solid rgba(255,255,255,0.25);
 }
-.calDot{
-  position:absolute;
-  right:8px;
-  top:8px;
-  width:8px;
-  height:8px;
-  border-radius:50%;
+/* v0.11: se elimina el puntito rojo; se pinta toda la celda */
+.calDot{ display:none; }
+
+.navBadgeNum{
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  min-width:18px;
+  height:18px;
+  padding:0 6px;
+  border-radius:999px;
   background:#ff3b30;
+  color:white;
+  font-size:12px;
+  font-weight:900;
+  margin-left:6px;
 }
 .eventsList{
   display:flex;
