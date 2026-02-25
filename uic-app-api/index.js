@@ -4,6 +4,7 @@ import webpush from "web-push";
 import { XMLParser } from "fast-xml-parser";
 import fs from "fs";
 import path from "path";
+import { Pool } from "pg";
 
 // En ESM no existe __dirname por defecto
 const __dirname = path.dirname(new URL(import.meta.url).pathname);
@@ -167,6 +168,83 @@ function writeCommsStore(store) {
 }
 
 let COMMS_STORE = readCommsStore();
+
+
+/* ---------------------- Persistencia (Opción B: DB externa) ---------------------- */
+
+// En Render Free, la memoria y el filesystem local pueden resetearse cuando la instancia duerme o se redeploya.
+// Si configurás DATABASE_URL, se usa una DB externa (Postgres) para persistir agenda y comunicaciones.
+const DATABASE_URL = String(process.env.DATABASE_URL || process.env.POSTGRES_URL || process.env.PG_URL || "").trim();
+const DB_SSL = String(process.env.DATABASE_SSL || "true").trim().toLowerCase() !== "false";
+
+// Retención (ajustable por env). Por defecto: agenda ~ 400 días; comunicaciones: 50 últimas.
+const EVENTS_KEEP_DAYS = Math.max(parseInt(process.env.EVENTS_KEEP_DAYS || "400", 10) || 400, 30);
+const COMMS_KEEP = Math.min(Math.max(parseInt(process.env.COMMS_KEEP || "50", 10) || 50, 1), 200);
+
+let dbReady = false;
+let pool = null;
+
+async function initDb() {
+  if (!DATABASE_URL) return;
+  try {
+    pool = new Pool({
+      connectionString: DATABASE_URL,
+      ssl: DB_SSL ? { rejectUnauthorized: false } : false,
+      max: 5,
+      idleTimeoutMillis: 30000,
+      connectionTimeoutMillis: 10000,
+    });
+    await pool.query("SELECT 1");
+
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS uic_events (
+        id TEXT PRIMARY KEY,
+        date DATE NOT NULL,
+        title TEXT NOT NULL,
+        description TEXT DEFAULT '',
+        highlight BOOLEAN NOT NULL DEFAULT FALSE,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `);
+    await pool.query(`CREATE INDEX IF NOT EXISTS uic_events_date_idx ON uic_events(date)`);
+
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS uic_comms (
+        id TEXT PRIMARY KEY,
+        title TEXT NOT NULL,
+        message TEXT NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `);
+    await pool.query(`CREATE INDEX IF NOT EXISTS uic_comms_created_idx ON uic_comms(created_at)`);
+
+    dbReady = true;
+    console.log("✅ DB externa habilitada (DATABASE_URL). Persistencia OK.");
+  } catch (e) {
+    dbReady = false;
+    console.log("⚠️ DB externa no disponible, usando JSON local:", e?.message || e);
+  }
+}
+
+async function pruneDb() {
+  if (!dbReady) return;
+  try {
+    // Agenda: mantener últimos EVENTS_KEEP_DAYS
+    await pool.query(`DELETE FROM uic_events WHERE date < (CURRENT_DATE - ($1 || ' days')::interval)`, [String(EVENTS_KEEP_DAYS)]);
+
+    // Comms: mantener últimas COMMS_KEEP
+    await pool.query(
+      `DELETE FROM uic_comms WHERE id IN (
+         SELECT id FROM uic_comms
+         ORDER BY created_at DESC
+         OFFSET $1
+       )`,
+      [COMMS_KEEP]
+    );
+  } catch (_) {}
+}
+
 
 function touchCommsStore() {
   COMMS_STORE.updatedAt = new Date().toISOString();
@@ -367,13 +445,54 @@ app.get("/health", (req, res) => res.json({ ok: true }));
 
 /* ----------------------------- Eventos --------------------------------- */
 
-app.get("/events/meta", (req, res) => {
+app.get("/events/meta", async (req, res) => {
+  try {
+    if (dbReady) {
+      const r = await pool.query("SELECT COUNT(*)::int AS count, MAX(updated_at) AS updated_at FROM uic_events");
+      const count = r.rows?.[0]?.count || 0;
+      const updatedAt = r.rows?.[0]?.updated_at ? new Date(r.rows[0].updated_at).toISOString() : "";
+      return res.json({ updatedAt, count });
+    }
+  } catch (e) {
+    console.log("⚠️ DB events/meta error, fallback JSON:", e?.message || e);
+  }
   return res.json({ updatedAt: EVENTS_STORE.updatedAt, count: EVENTS_STORE.events.length });
 });
 
-app.get("/events", (req, res) => {
+app.get("/events", async (req, res) => {
   const from = isoDateOnly((req.query.from || "").toString().trim());
   const to = isoDateOnly((req.query.to || "").toString().trim());
+
+  try {
+    if (dbReady) {
+      let q = "SELECT id, to_char(date,'YYYY-MM-DD') AS date, title, COALESCE(description,'') AS description, highlight, created_at, updated_at FROM uic_events";
+      const params = [];
+      if (from || to) {
+        q += " WHERE 1=1";
+        if (from) { params.push(from); q += ` AND date >= $${params.length}`; }
+        if (to) { params.push(to); q += ` AND date <= $${params.length}`; }
+      }
+      q += " ORDER BY date ASC";
+      const r = await pool.query(q, params);
+
+      const items = (r.rows || []).map((x) => ({
+        id: x.id,
+        date: x.date,
+        title: x.title,
+        description: x.description || "",
+        highlight: Boolean(x.highlight),
+        createdAt: x.created_at ? new Date(x.created_at).toISOString() : "",
+        updatedAt: x.updated_at ? new Date(x.updated_at).toISOString() : "",
+      }));
+
+      const meta = await pool.query("SELECT MAX(updated_at) AS updated_at FROM uic_events");
+      const updatedAt = meta.rows?.[0]?.updated_at ? new Date(meta.rows[0].updated_at).toISOString() : "";
+
+      return res.json({ updatedAt, items });
+    }
+  } catch (e) {
+    console.log("⚠️ DB events/list error, fallback JSON:", e?.message || e);
+  }
 
   const items = (EVENTS_STORE.events || [])
     .filter((ev) => inRange(ev.date, from, to))
@@ -382,7 +501,7 @@ app.get("/events", (req, res) => {
   return res.json({ updatedAt: EVENTS_STORE.updatedAt, items });
 });
 
-app.post("/events", requireAdmin, (req, res) => {
+app.post("/events", requireAdmin, async (req, res) => {
   const date = isoDateOnly(req.body?.date);
   const title = (req.body?.title || "").toString().trim();
   const description = (req.body?.description || "").toString().trim();
@@ -393,35 +512,92 @@ app.post("/events", requireAdmin, (req, res) => {
 
   const now = new Date().toISOString();
   const id = `ev_${Math.random().toString(36).slice(2, 10)}${Date.now().toString(36)}`;
+
+  try {
+    if (dbReady) {
+      await pool.query(
+        "INSERT INTO uic_events(id, date, title, description, highlight, created_at, updated_at) VALUES($1,$2,$3,$4,$5,NOW(),NOW())",
+        [id, date, title, description, highlight]
+      );
+      await pruneDb();
+      return res.status(201).json({ ok: true, item: { id, date, title, description, highlight, createdAt: now, updatedAt: now }, updatedAt: now });
+    }
+  } catch (e) {
+    console.log("⚠️ DB events/create error, fallback JSON:", e?.message || e);
+  }
+
   const ev = { id, date, title, description, highlight, createdAt: now, updatedAt: now };
   EVENTS_STORE.events.unshift(ev);
   touchEventsStore();
   return res.status(201).json({ ok: true, item: ev, updatedAt: EVENTS_STORE.updatedAt });
 });
 
-app.put("/events/:id", requireAdmin, (req, res) => {
+app.put("/events/:id", requireAdmin, async (req, res) => {
   const id = (req.params.id || "").toString();
+
+  const date = req.body?.date ? isoDateOnly(req.body.date) : null;
+  const title = req.body?.title !== undefined ? (req.body.title || "").toString().trim() : null;
+  const description = req.body?.description !== undefined ? (req.body.description || "").toString().trim() : null;
+  const highlight = req.body?.highlight !== undefined ? Boolean(req.body.highlight) : null;
+
+  try {
+    if (dbReady) {
+      // Trae actual para completar campos omitidos
+      const cur = await pool.query("SELECT id, to_char(date,'YYYY-MM-DD') AS date, title, COALESCE(description,'') AS description, highlight FROM uic_events WHERE id=$1", [id]);
+      if (!cur.rows?.length) return res.status(404).json({ error: "Evento no encontrado" });
+      const base = cur.rows[0];
+
+      const newDate = date || base.date;
+      const newTitle = title !== null ? title : base.title;
+      const newDesc = description !== null ? description : (base.description || "");
+      const newHighlight = highlight !== null ? highlight : Boolean(base.highlight);
+
+      if (!newDate) return res.status(400).json({ error: "date inválida (formato: YYYY-MM-DD)" });
+      if (!newTitle) return res.status(400).json({ error: "title requerido" });
+
+      const now = new Date().toISOString();
+      await pool.query(
+        "UPDATE uic_events SET date=$2, title=$3, description=$4, highlight=$5, updated_at=NOW() WHERE id=$1",
+        [id, newDate, newTitle, newDesc, newHighlight]
+      );
+      await pruneDb();
+      return res.json({ ok: true, item: { id, date: newDate, title: newTitle, description: newDesc, highlight: newHighlight, updatedAt: now }, updatedAt: now });
+    }
+  } catch (e) {
+    console.log("⚠️ DB events/update error, fallback JSON:", e?.message || e);
+  }
+
   const idx = (EVENTS_STORE.events || []).findIndex((x) => x.id === id);
   if (idx < 0) return res.status(404).json({ error: "Evento no encontrado" });
 
-  const date = req.body?.date ? isoDateOnly(req.body.date) : EVENTS_STORE.events[idx].date;
-  const title = req.body?.title !== undefined ? (req.body.title || "").toString().trim() : EVENTS_STORE.events[idx].title;
-  const description =
-    req.body?.description !== undefined
-      ? (req.body.description || "").toString().trim()
-      : EVENTS_STORE.events[idx].description;
-  const highlight = req.body?.highlight !== undefined ? Boolean(req.body.highlight) : EVENTS_STORE.events[idx].highlight;
+  const newDate = date || EVENTS_STORE.events[idx].date;
+  const newTitle = title !== null ? title : EVENTS_STORE.events[idx].title;
+  const newDesc = description !== null ? description : EVENTS_STORE.events[idx].description;
+  const newHighlight = highlight !== null ? highlight : EVENTS_STORE.events[idx].highlight;
 
-  if (!date) return res.status(400).json({ error: "date inválida (formato: YYYY-MM-DD)" });
-  if (!title) return res.status(400).json({ error: "title requerido" });
+  if (!newDate) return res.status(400).json({ error: "date inválida (formato: YYYY-MM-DD)" });
+  if (!newTitle) return res.status(400).json({ error: "title requerido" });
 
-  EVENTS_STORE.events[idx] = { ...EVENTS_STORE.events[idx], date, title, description, highlight, updatedAt: new Date().toISOString() };
+  EVENTS_STORE.events[idx] = { ...EVENTS_STORE.events[idx], date: newDate, title: newTitle, description: newDesc, highlight: newHighlight, updatedAt: new Date().toISOString() };
   touchEventsStore();
   return res.json({ ok: true, item: EVENTS_STORE.events[idx], updatedAt: EVENTS_STORE.updatedAt });
 });
 
-app.delete("/events/:id", requireAdmin, (req, res) => {
+app.delete("/events/:id", requireAdmin, async (req, res) => {
   const id = (req.params.id || "").toString();
+
+  try {
+    if (dbReady) {
+      const r = await pool.query("DELETE FROM uic_events WHERE id=$1", [id]);
+      if (!r.rowCount) return res.status(404).json({ error: "Evento no encontrado" });
+      const now = new Date().toISOString();
+      await pruneDb();
+      return res.json({ ok: true, updatedAt: now });
+    }
+  } catch (e) {
+    console.log("⚠️ DB events/delete error, fallback JSON:", e?.message || e);
+  }
+
   const before = EVENTS_STORE.events.length;
   EVENTS_STORE.events = (EVENTS_STORE.events || []).filter((x) => x.id !== id);
   if (EVENTS_STORE.events.length === before) return res.status(404).json({ error: "Evento no encontrado" });
@@ -431,173 +607,97 @@ app.delete("/events/:id", requireAdmin, (req, res) => {
 
 /* -------------------- Comunicación al socio (COMMS) --------------------- */
 
-app.get("/comms/meta", (req, res) => {
-  return res.json({ updatedAt: COMMS_STORE.updatedAt, count: (COMMS_STORE.items || []).length });
+app.get("/comms/meta", async (req, res) => {
+  try {
+    if (dbReady) {
+      const r = await pool.query("SELECT COUNT(*)::int AS count, MAX(created_at) AS updated_at FROM uic_comms");
+      const count = r.rows?.[0]?.count || 0;
+      const updatedAt = r.rows?.[0]?.updated_at ? new Date(r.rows[0].updated_at).toISOString() : "";
+      return res.json({ updatedAt, count });
+    }
+  } catch (e) {
+    console.log("⚠️ DB comms/meta error, fallback JSON:", e?.message || e);
+  }
+  return res.json({ updatedAt: COMMS_STORE.updatedAt, count: COMMS_STORE.items.length });
 });
 
-app.get("/comms", (req, res) => {
-  const limit = Math.min(parseInt(req.query.limit || "10", 10) || 10, 50);
+app.get("/comms", async (req, res) => {
+  const limit = Math.min(Math.max(parseInt(req.query.limit || "50", 10) || 50, 1), 200);
+
+  try {
+    if (dbReady) {
+      const r = await pool.query(
+        "SELECT id, title, message, created_at FROM uic_comms ORDER BY created_at DESC LIMIT $1",
+        [limit]
+      );
+
+      const items = (r.rows || []).map((x) => ({
+        id: x.id,
+        title: x.title,
+        message: x.message,
+        createdAt: x.created_at ? new Date(x.created_at).toISOString() : "",
+      }));
+
+      const meta = await pool.query("SELECT MAX(created_at) AS updated_at FROM uic_comms");
+      const updatedAt = meta.rows?.[0]?.updated_at ? new Date(meta.rows[0].updated_at).toISOString() : "";
+
+      return res.json({ updatedAt, items });
+    }
+  } catch (e) {
+    console.log("⚠️ DB comms/list error, fallback JSON:", e?.message || e);
+  }
+
   const items = (COMMS_STORE.items || []).slice(0, limit);
   return res.json({ updatedAt: COMMS_STORE.updatedAt, items });
 });
 
-app.post("/comms", requireAdmin, (req, res) => {
+app.post("/comms", requireAdmin, async (req, res) => {
   const title = (req.body?.title || "").toString().trim();
   const message = (req.body?.message || "").toString().trim();
+
   if (!title) return res.status(400).json({ error: "title requerido" });
   if (!message) return res.status(400).json({ error: "message requerido" });
 
   const now = new Date().toISOString();
   const id = `cm_${Math.random().toString(36).slice(2, 10)}${Date.now().toString(36)}`;
-  const item = { id, title, message, createdAt: now };
-  COMMS_STORE.items.unshift(item);
+
+  try {
+    if (dbReady) {
+      await pool.query("INSERT INTO uic_comms(id, title, message, created_at) VALUES($1,$2,$3,NOW())", [id, title, message]);
+      await pruneDb();
+      return res.status(201).json({ ok: true, item: { id, title, message, createdAt: now }, updatedAt: now });
+    }
+  } catch (e) {
+    console.log("⚠️ DB comms/create error, fallback JSON:", e?.message || e);
+  }
+
+  COMMS_STORE.items.unshift({ id, title, message, createdAt: now });
+  // mantener tamaño razonable (fallback JSON)
+  COMMS_STORE.items = (COMMS_STORE.items || []).slice(0, COMMS_KEEP);
   touchCommsStore();
-  return res.status(201).json({ ok: true, item, updatedAt: COMMS_STORE.updatedAt });
+  return res.status(201).json({ ok: true, item: COMMS_STORE.items[0], updatedAt: COMMS_STORE.updatedAt });
 });
 
-app.delete("/comms/:id", requireAdmin, (req, res) => {
+app.delete("/comms/:id", requireAdmin, async (req, res) => {
   const id = (req.params.id || "").toString();
-  const before = (COMMS_STORE.items || []).length;
+
+  try {
+    if (dbReady) {
+      const r = await pool.query("DELETE FROM uic_comms WHERE id=$1", [id]);
+      if (!r.rowCount) return res.status(404).json({ error: "Mensaje no encontrado" });
+      const now = new Date().toISOString();
+      await pruneDb();
+      return res.json({ ok: true, updatedAt: now });
+    }
+  } catch (e) {
+    console.log("⚠️ DB comms/delete error, fallback JSON:", e?.message || e);
+  }
+
+  const before = COMMS_STORE.items.length;
   COMMS_STORE.items = (COMMS_STORE.items || []).filter((x) => x.id !== id);
-  if ((COMMS_STORE.items || []).length === before) return res.status(404).json({ error: "Mensaje no encontrado" });
+  if (COMMS_STORE.items.length === before) return res.status(404).json({ error: "Mensaje no encontrado" });
   touchCommsStore();
   return res.json({ ok: true, updatedAt: COMMS_STORE.updatedAt });
-});
-
-/**
- * GET /wp/posts
- * Query:
- * - per_page (default 10)
- * - search
- * - category (slug)  -> beneficios | eventos | etc.
- */
-app.get("/wp/posts", async (req, res) => {
-  const totalLimit = Math.min(parseInt(req.query.limit_total || "100", 10) || 100, 100);
-  const perPage = Math.min(parseInt(req.query.per_page || "10", 10) || 10, 50);
-  const page = Math.max(parseInt(req.query.page || "1", 10) || 1, 1);
-  const search = (req.query.search || "").toString().trim().toLowerCase();
-  const category = (req.query.category || req.query.categories || "").toString().trim().toLowerCase();
-
-  try {
-    // ---- MODE REST (solo si NO está bloqueado) ----
-    if (WP_MODE === "rest") {
-      const params = new URLSearchParams();
-      params.set("per_page", String(perPage));
-      params.set("page", String(page));
-      if (search) params.set("search", search);
-
-      // En REST, category es numérico; si nos pasan slug, intentamos resolverlo.
-      if (category) {
-        // Busca categorías por slug
-        const cats = await fetchJson(`${WP_BASE}/categories?per_page=100`);
-        const found = (cats || []).find((c) => c?.slug === category);
-        if (found?.id) params.set("categories", String(found.id));
-      }
-
-      // fetch directo para poder leer headers si hiciera falta en el futuro
-      const r = await fetch(`${WP_BASE}/posts?${params.toString()}`);
-      if (!r.ok) throw new Error(`WP REST posts failed: ${r.status} ${r.statusText}`);
-      const posts = await r.json();
-      const normalized = (posts || []).map((p) => ({
-        id: p.id,
-        title: decodeHtml(p?.title?.rendered || ""),
-        link: p.link,
-        date: p.date,
-        categories: [], // se completa si hace falta
-        excerpt: decodeHtml((p?.excerpt?.rendered || "").replace(/<[^>]+>/g, "")).slice(0, 240).trim(),
-        image: p?.yoast_head_json?.og_image?.[0]?.url || "",
-      }));
-      const hasMore = page * perPage < totalLimit && (normalized || []).length === perPage;
-      return res.json({
-        mode: "rest",
-        page,
-        per_page: perPage,
-        limit_total: totalLimit,
-        has_more: hasMore,
-        next_page: hasMore ? page + 1 : null,
-        items: normalized,
-      });
-    }
-
-    // ---- MODE RSS (default) ----
-    const base = WP_SITE_BASE;
-
-    // Si hay categoría, intentamos feed de categoría (más eficiente)
-    const feedUrl = category
-      ? `${base}/category/${encodeURIComponent(category)}/feed/`
-      : WP_FEED_URL;
-
-    // RSS paginado (si WP lo soporta con ?paged=N)
-    const pageUrl = (() => {
-      const u = new URL(feedUrl);
-      u.searchParams.set("paged", String(page));
-      return u.toString();
-    })();
-
-    let items = await fetchRssItems(pageUrl);
-
-    // Si WP no tiene /category/slug/feed/, cae a feed global y filtramos
-    if (category && items.length === 0) {
-      const all = await fetchRssItems(WP_FEED_URL);
-      items = all.filter((p) => p.category_slugs.includes(category));
-    }
-
-    // Filtro búsqueda (cliente)
-    if (search) {
-      items = items.filter((p) => (p.title + " " + p.excerpt).toLowerCase().includes(search));
-    }
-
-    items = items.slice(0, perPage);
-
-    const hasMore = page * perPage < totalLimit && items.length === perPage;
-
-    res.json({
-      mode: "rss",
-      feed: pageUrl,
-      page,
-      per_page: perPage,
-      limit_total: totalLimit,
-      has_more: hasMore,
-      next_page: hasMore ? page + 1 : null,
-      items,
-    });
-  } catch (e) {
-    res.status(502).json({
-      error: "wp_fetch_failed",
-      message: e?.message || String(e),
-      hint:
-        "Si WP REST está bloqueada (401 ithemes), usá WP_MODE=rss y WP_SITE_BASE. Probá el feed público /feed/ en el navegador.",
-    });
-  }
-});
-
-/**
- * GET /wp/categories
- * - RSS: calcula categorías a partir del feed
- * - REST: devuelve categorías del endpoint
- */
-app.get("/wp/categories", async (req, res) => {
-  try {
-    if (WP_MODE === "rest") {
-      const cats = await fetchJson(`${WP_BASE}/categories?per_page=100`);
-      const normalized = (cats || []).map((c) => ({ id: c.id, name: c.name, slug: c.slug }));
-      return res.json({ mode: "rest", items: normalized });
-    }
-
-    const items = await fetchRssItems(WP_FEED_URL);
-    const map = new Map();
-    for (const p of items) {
-      for (let i = 0; i < p.categories.length; i++) {
-        const name = p.categories[i];
-        const slug = p.category_slugs[i] || slugify(name);
-        if (!slug) continue;
-        if (!map.has(slug)) map.set(slug, { slug, name });
-      }
-    }
-    res.json({ mode: "rss", items: Array.from(map.values()).sort((a, b) => a.name.localeCompare(b.name)) });
-  } catch (e) {
-    res.status(502).json({ error: "wp_categories_failed", message: e?.message || String(e) });
-  }
 });
 
 /* ----------------------------- Push endpoints --------------------------- */
@@ -621,7 +721,13 @@ app.post("/subscribe", (req, res) => {
 
 /* ----------------------------- Start ----------------------------------- */
 
-app.listen(PORT, () => {
-  console.log(`UIC API running on :${PORT}`);
-  console.log(`WP_MODE=${WP_MODE} WP_SITE_BASE=${WP_SITE_BASE}`);
-});
+async function start() {
+  await initDb();
+
+  app.listen(PORT, () => {
+    console.log(`UIC API running on :${PORT}`);
+    console.log(`WP_MODE=${WP_MODE} WP_SITE_BASE=${WP_SITE_BASE}`);
+  });
+}
+
+start();

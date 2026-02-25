@@ -1,6 +1,6 @@
 {
   "name": "uic-app-api",
-  "version": "0.6.1",
+  "version": "0.7.0",
   "type": "module",
   "main": "index.js",
   "scripts": {
@@ -10,6 +10,7 @@
     "cors": "^2.8.5",
     "express": "^4.19.2",
     "web-push": "^3.6.7",
-    "fast-xml-parser": "^4.5.3"
+    "fast-xml-parser": "^4.5.3",
+    "pg": "^8.13.1"
   }
 }
