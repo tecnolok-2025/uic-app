@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import "./index.css";
+import logoUIC from "./assets/logo-uic.jpeg";
 
 const API_BASE = import.meta.env.VITE_API_BASE || ""; // ej: https://uic-campana-api.onrender.com
 
@@ -54,7 +55,7 @@ async function hardRefresh() {
 }
 
 export default function App() {
-  const [tab, setTab] = useState("inicio"); // inicio | publicaciones | beneficios | agenda | ajustes
+  const [tab, setTab] = useState("inicio"); // inicio | publicaciones | beneficios | agenda | comunicacion | ajustes
 
   const [posts, setPosts] = useState([]);
   const [postsPager, setPostsPager] = useState({ page: 1, per_page: 6, limit_total: 100, has_more: false });
@@ -85,7 +86,6 @@ export default function App() {
   const [comms, setComms] = useState([]);
   const [commsMeta, setCommsMeta] = useState({ updatedAt: null, count: 0 });
   const [commsUnseen, setCommsUnseen] = useState(0);
-  const [commsOpen, setCommsOpen] = useState(false);
   const [commsComposeOpen, setCommsComposeOpen] = useState(false);
 
   const canUseApi = useMemo(() => Boolean(API_BASE), []);
@@ -174,127 +174,12 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab]);
 
-  // Si el usuario abre Comunicación al socio, consideramos vista la comunicación vigente.
   useEffect(() => {
-    if (tab !== "agenda") return;
-    if (!commsOpen) return;
+    if (tab !== "comunicacion") return;
+    loadComms(10);
     if (commsMeta?.updatedAt) markCommsSeen(commsMeta.updatedAt);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tab, commsOpen, commsMeta?.updatedAt]);
-
-  // Comunicación al socio: meta (para badge)
-  useEffect(() => {
-    if (!canUseApi) return;
-    (async () => {
-      try {
-        const meta = await apiGet("/comms/meta");
-        setCommsMeta(meta);
-        const lastSeen = localStorage.getItem("uic_comms_seen_at") || "";
-        if (meta?.updatedAt && meta.updatedAt !== lastSeen) setCommsUnseen(1);
-      } catch {
-        // ignorar
-      }
-    })();
-  }, [canUseApi]);
-
-  function markCommsSeen(updatedAt) {
-    if (!updatedAt) return;
-    localStorage.setItem("uic_comms_seen_at", updatedAt);
-    setCommsUnseen(0);
-  }
-
-  // Eventos de HOY: badge numérico
-  useEffect(() => {
-    if (!canUseApi) return;
-    const tick = async () => {
-      try {
-        const d = localIsoDate();
-        const qs = new URLSearchParams();
-        qs.set("from", d);
-        qs.set("to", d);
-        const data = await apiGet(`/events?${qs.toString()}`);
-        setTodayEventsCount((data.items || []).length);
-      } catch {
-        // ignorar
-      }
-    };
-    tick();
-    const id = setInterval(tick, 10 * 60 * 1000); // cada 10 min
-    return () => clearInterval(id);
-  }, [canUseApi]);
-
-  // Badge total (Agenda + Comms)
-  useEffect(() => {
-    const total = (todayEventsCount || 0) + (commsUnseen || 0);
-    setBadgeCount(total);
-  }, [todayEventsCount, commsUnseen]);
-
-  // Badge en ícono PWA (Android/Chrome y iOS 16.4+). Requiere permiso de notificaciones en iOS.
-  useEffect(() => {
-    try {
-      const n = badgeCount || 0;
-      if ("setAppBadge" in navigator) {
-        if (n > 0) navigator.setAppBadge(n);
-        else if ("clearAppBadge" in navigator) navigator.clearAppBadge();
-      }
-    } catch {
-      // ignorar
-    }
-  }, [badgeCount]);
-
-  function localIsoDate(d = new Date()) {
-    const y = d.getFullYear();
-    const m = String(d.getMonth() + 1).padStart(2, "0");
-    const day = String(d.getDate()).padStart(2, "0");
-    return `${y}-${m}-${day}`;
-  }
-
-  function addMonths(d, n) {
-    return new Date(d.getFullYear(), d.getMonth() + n, 1);
-  }
-
-  // Rango de navegación de Agenda:
-  // - Hasta 6 años hacia atrás (desde el mes actual)
-  // - Hasta 1 año hacia adelante (contando el mes actual)
-  //   Nota: como se muestran 2 meses, el "base" puede llegar hasta +11 meses,
-  //   para que el segundo mes visible sea +12.
-  function agendaMinBase() {
-    const n = new Date();
-    return new Date(n.getFullYear() - 6, n.getMonth(), 1);
-  }
-
-  function agendaMaxBase() {
-    const n = new Date();
-    return new Date(n.getFullYear(), n.getMonth() + 11, 1);
-  }
-
-  async function loadAgendaForTwoMonths(baseDate = new Date()) {
-    if (!canUseApi) return;
-    const b = new Date(baseDate.getFullYear(), baseDate.getMonth(), 1);
-    setAgendaBase(b);
-    const y = b.getFullYear();
-    const m = b.getMonth();
-    const from = new Date(y, m, 1);
-    const to = new Date(y, m + 2, 0);
-    const iso = (d) => localIsoDate(d);
-    const qs = new URLSearchParams();
-    qs.set("from", iso(from));
-    qs.set("to", iso(to));
-    const data = await apiGet(`/events?${qs.toString()}`);
-    setEvents(data.items || []);
-    if (data.updatedAt) setEventsMeta({ updatedAt: data.updatedAt, count: (data.items || []).length });
-  }
-
-  async function createEvent({ date, title, description, highlight }) {
-    if (!canUseApi) return;
-    const r = await fetch(`${API_BASE}/events`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-admin-token": adminToken,
-      },
-      body: JSON.stringify({ date, title, description, highlight }),
-    });
+  }, [tab]);
     if (!r.ok) {
       const j = await r.json().catch(() => ({}));
       throw new Error(j?.error || `Error ${r.status}`);
@@ -309,7 +194,7 @@ export default function App() {
     { label: "Promoción Industrial", href: "https://uic-campana.com.ar/category/promocion-industrial/" },
     { label: "Beneficios", href: "#", onClick: () => setTab("beneficios") },
     { label: "Agenda", href: "#", onClick: () => setTab("agenda") },
-    { label: "Comunicación al socio", href: "#", onClick: () => { setTab("agenda"); setCommsOpen(true); } },
+    { label: "Comunicación al socio", href: "#", onClick: () => { setTab("comunicacion"); } },
     { label: "Sitio UIC", href: "https://uic-campana.com.ar" },
   ];
 
@@ -472,7 +357,8 @@ export default function App() {
       if (data.updatedAt) {
         setCommsMeta((m) => ({ ...m, updatedAt: data.updatedAt }));
         const lastSeen = localStorage.getItem("uic_comms_seen_at") || "";
-        if (data.updatedAt !== lastSeen) setCommsUnseen(1);
+        if ((data.items || []).length > 0 && data.updatedAt !== lastSeen) setCommsUnseen(1);
+        if ((data.items || []).length === 0) setCommsUnseen(0);
       }
     } catch {
       // ignorar
@@ -504,12 +390,11 @@ export default function App() {
     <div className="app">
       <header className="topbar">
         <div className="brand">
-          <div className="brandTitle">UIC</div>
-          <div className="brandSub">Campana</div>
+          <img className="brandLogo" src={logoUIC} alt="UIC Campana" />
         </div>
 
         <div className="topActions">
-          {/* MVP: Push deshabilitado (sin botón) */}
+          {/* reservado */}
         </div>
       </header>
 
@@ -558,9 +443,6 @@ export default function App() {
                   </button>
                   <button className="btnSecondary" disabled={!postsPager.has_more} onClick={() => loadPosts({ perPage: 6, page: postsPager.page + 1 })}>
                     ▶
-                  </button>
-                  <button className="btnPrimary" onClick={() => loadPosts({ perPage: 6, page: 1 })}>
-                    Actualizar
                   </button>
                 </div>
               </div>
@@ -618,9 +500,6 @@ export default function App() {
           <section className="card">
             <div className="rowBetween">
               <div className="cardTitle">Publicaciones</div>
-              <button className="btnPrimary" onClick={() => loadPosts({ perPage: 6, page: 1 })}>
-                Actualizar
-              </button>
             </div>
 
             <div className="searchRow">
@@ -788,95 +667,12 @@ export default function App() {
                     );
                   })()}
                 </div>
-
-                {/* Comunicación al socio (debajo de agenda) */}
+                {/* Comunicación al socio */}
                 <div style={{ marginTop: 14 }}>
-                  <div className="rowBetween">
-                    <div className="row" style={{ gap: 10, alignItems: "center" }}>
-                      <button
-                        className="btnPrimary"
-                        onClick={() => {
-                          const next = !commsOpen;
-                          setCommsOpen(next);
-                          if (next) loadComms(10);
-                        }}
-                      >
-                        Comunicación al socio
-                        {commsUnseen > 0 && <span className="navBadgeNum">{commsUnseen}</span>}
-                      </button>
-                      <button className="btnSecondary" onClick={() => loadComms(10)} disabled={!commsOpen}>
-                        Actualizar
-                      </button>
-                    </div>
-
-                    {/* Panel admin siempre accesible (no depende de seleccionar un día) */}
-                    <div className="row" style={{ gap: 8, alignItems: "center" }}>
-                      {!isAdmin ? (
-                        <>
-                          <input
-                            className="input"
-                            placeholder="Clave admin"
-                            value={adminToken}
-                            onChange={(e) => setAdminToken(e.target.value)}
-                            style={{ width: 160 }}
-                          />
-                          <button
-                            className="btnSecondary"
-                            onClick={() => {
-                              localStorage.setItem("uic_admin_token", adminToken);
-                              alert("Token guardado en este dispositivo.");
-                            }}
-                          >
-                            Guardar
-                          </button>
-                        </>
-                      ) : (
-                        <>
-                          <button
-                            className="btnSecondary"
-                            onClick={() => {
-                              setCommsOpen(true);
-                              setCommsComposeOpen((v) => !v);
-                            }}
-                          >
-                            {commsComposeOpen ? "Cerrar editor" : "Publicar"}
-                          </button>
-                          <button
-                            className="btnSecondary"
-                            onClick={() => {
-                              localStorage.removeItem("uic_admin_token");
-                              setAdminToken("");
-                              alert("Token eliminado en este dispositivo.");
-                            }}
-                          >
-                            Salir admin
-                          </button>
-                        </>
-                      )}
-                    </div>
-                  </div>
-
-                  {commsOpen && (
-                    <>
-                      <div className="cardSub" style={{ marginTop: 8 }}>
-                        Mensajes institucionales publicados por el administrador.
-                      </div>
-
-                      {(() => {
-                        const latest = comms?.[0];
-                        if (!latest) return <div className="muted" style={{ marginTop: 8 }}>No hay comunicaciones publicadas.</div>;
-                        return (
-                          <div className="eventItem" style={{ marginTop: 10 }}>
-                            <div className="eventTitle">{latest.title}</div>
-                            <div className="muted" style={{ fontSize: 12, marginTop: 2 }}>{latest.createdAt?.slice(0, 10) || ""}</div>
-                            <div className="eventDesc" style={{ whiteSpace: "pre-wrap" }}>{latest.message}</div>
-                          </div>
-                        );
-                      })()}
-
-                      {isAdmin && commsComposeOpen && <CommCreateForm onPublish={publishComm} />}
-                    </>
-                  )}
+                  <button className="btnPrimary" onClick={() => setTab("comunicacion")}>
+                    Comunicación al socio
+                    {commsUnseen > 0 && <span className="navBadgeNum">{commsUnseen}</span>}
+                  </button>
                 </div>
 
 
@@ -939,6 +735,75 @@ export default function App() {
                 )}
               </>
             )}
+          </section>
+        )}
+
+        
+
+        {tab === "comunicacion" && (
+          <section className="card">
+            <div className="rowBetween">
+              <div>
+                <div className="cardTitle">Comunicación al socio</div>
+                <div className="cardSub">Mensajes institucionales (tipo WhatsApp). Solo el administrador puede publicar.</div>
+              </div>
+              <div className="row" style={{ gap: 8, alignItems: "center" }}>
+                {!isAdmin ? (
+                  <>
+                    <input
+                      className="input"
+                      placeholder="Clave admin"
+                      value={adminToken}
+                      onChange={(e) => setAdminToken(e.target.value)}
+                      style={{ width: 160 }}
+                    />
+                    <button
+                      className="btnSecondary"
+                      onClick={() => {
+                        localStorage.setItem("uic_admin_token", adminToken);
+                        alert("Token guardado en este dispositivo.");
+                      }}
+                    >
+                      Guardar
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <button className="btnSecondary" onClick={() => setCommsComposeOpen((v) => !v)}>
+                      {commsComposeOpen ? "Cerrar editor" : "Publicar"}
+                    </button>
+                    <button
+                      className="btnSecondary"
+                      onClick={() => {
+                        localStorage.removeItem("uic_admin_token");
+                        setAdminToken("");
+                        alert("Token eliminado en este dispositivo.");
+                      }}
+                    >
+                      Salir admin
+                    </button>
+                  </>
+                )}
+              </div>
+            </div>
+
+            {isAdmin && commsComposeOpen && <CommCreateForm onPublish={publishComm} />}
+
+            <div style={{ marginTop: 12 }}>
+              {(comms || []).length === 0 ? (
+                <div className="muted">No hay comunicaciones publicadas.</div>
+              ) : (
+                <div className="eventsList">
+                  {comms.map((c) => (
+                    <div key={c.id || c.createdAt || c.title} className="eventItem">
+                      <div className="eventTitle">{c.title}</div>
+                      <div className="muted" style={{ fontSize: 12, marginTop: 2 }}>{(c.createdAt || "").slice(0, 10)}</div>
+                      <div className="eventDesc" style={{ whiteSpace: "pre-wrap" }}>{c.message}</div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
           </section>
         )}
 

@@ -17,9 +17,15 @@ a{color:inherit}
 .topbar{
   padding:18px 16px 12px;
   display:flex;
-  align-items:flex-start;
-  justify-content:space-between;
+  align-items:center;
+  justify-content:center;
+  position:relative;
 }
+
+.brand{display:flex;flex-direction:column;align-items:center;justify-content:center}
+.brandLogo{height:52px;max-width:88vw;object-fit:contain}
+
+.topActions{position:absolute;right:16px;top:18px;display:flex;gap:10px;align-items:center}
 
 .brandTitle{font-size:38px;font-weight:800;letter-spacing:0.4px}
 .brandSub{margin-top:2px;color:var(--muted);font-size:16px}
