@@ -37,6 +37,22 @@ async function apiGet(path) {
   return data;
 }
 
+async function hardRefresh() {
+  try {
+    if ("serviceWorker" in navigator) {
+      const regs = await navigator.serviceWorker.getRegistrations();
+      await Promise.all(regs.map((r) => r.unregister()));
+    }
+    if ("caches" in window) {
+      const keys = await caches.keys();
+      await Promise.all(keys.map((k) => caches.delete(k)));
+    }
+  } catch (_) {
+    // ignore
+  }
+  window.location.reload();
+}
+
 export default function App() {
   const [tab, setTab] = useState("inicio"); // inicio | publicaciones | beneficios | agenda | ajustes
 
@@ -69,6 +85,8 @@ export default function App() {
   const [comms, setComms] = useState([]);
   const [commsMeta, setCommsMeta] = useState({ updatedAt: null, count: 0 });
   const [commsUnseen, setCommsUnseen] = useState(0);
+  const [commsOpen, setCommsOpen] = useState(false);
+  const [commsComposeOpen, setCommsComposeOpen] = useState(false);
 
   const canUseApi = useMemo(() => Boolean(API_BASE), []);
 
@@ -156,12 +174,13 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab]);
 
-  // Si el usuario entra a Agenda, consideramos vista la comunicación vigente.
+  // Si el usuario abre Comunicación al socio, consideramos vista la comunicación vigente.
   useEffect(() => {
     if (tab !== "agenda") return;
+    if (!commsOpen) return;
     if (commsMeta?.updatedAt) markCommsSeen(commsMeta.updatedAt);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tab, commsMeta?.updatedAt]);
+  }, [tab, commsOpen, commsMeta?.updatedAt]);
 
   // Comunicación al socio: meta (para badge)
   useEffect(() => {
@@ -189,8 +208,7 @@ export default function App() {
     if (!canUseApi) return;
     const tick = async () => {
       try {
-        const today = new Date();
-        const d = today.toISOString().slice(0, 10);
+        const d = localIsoDate();
         const qs = new URLSearchParams();
         qs.set("from", d);
         qs.set("to", d);
@@ -211,7 +229,7 @@ export default function App() {
     setBadgeCount(total);
   }, [todayEventsCount, commsUnseen]);
 
-  // Intento de badge en ícono PWA (Android/Chrome). En iOS puede no estar disponible.
+  // Badge en ícono PWA (Android/Chrome y iOS 16.4+). Requiere permiso de notificaciones en iOS.
   useEffect(() => {
     try {
       const n = badgeCount || 0;
@@ -224,8 +242,30 @@ export default function App() {
     }
   }, [badgeCount]);
 
+  function localIsoDate(d = new Date()) {
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, "0");
+    const day = String(d.getDate()).padStart(2, "0");
+    return `${y}-${m}-${day}`;
+  }
+
   function addMonths(d, n) {
     return new Date(d.getFullYear(), d.getMonth() + n, 1);
+  }
+
+  // Rango de navegación de Agenda:
+  // - Hasta 6 años hacia atrás (desde el mes actual)
+  // - Hasta 1 año hacia adelante (contando el mes actual)
+  //   Nota: como se muestran 2 meses, el "base" puede llegar hasta +11 meses,
+  //   para que el segundo mes visible sea +12.
+  function agendaMinBase() {
+    const n = new Date();
+    return new Date(n.getFullYear() - 6, n.getMonth(), 1);
+  }
+
+  function agendaMaxBase() {
+    const n = new Date();
+    return new Date(n.getFullYear(), n.getMonth() + 11, 1);
   }
 
   async function loadAgendaForTwoMonths(baseDate = new Date()) {
@@ -236,7 +276,7 @@ export default function App() {
     const m = b.getMonth();
     const from = new Date(y, m, 1);
     const to = new Date(y, m + 2, 0);
-    const iso = (d) => d.toISOString().slice(0, 10);
+    const iso = (d) => localIsoDate(d);
     const qs = new URLSearchParams();
     qs.set("from", iso(from));
     qs.set("to", iso(to));
@@ -262,20 +302,21 @@ export default function App() {
     const j = await r.json();
     setEventsMeta((m) => ({ ...m, updatedAt: j.updatedAt || m.updatedAt }));
     await loadAgendaForTwoMonths(new Date(date + "T00:00:00"));
-  }
+  };
 
   const quickLinks = [
-    { label: "Hacete socio", href: "https://uic-campana.com.ar/asociate/" },
-    { label: "Promoción Industrial", href: "https://uic-campana.com.ar/promocion-industrial/" },
+    { label: "Hacete socio", href: "https://uic-campana.com.ar/hacete-socio/" },
+    { label: "Promoción Industrial", href: "https://uic-campana.com.ar/category/promocion-industrial/" },
     { label: "Beneficios", href: "#", onClick: () => setTab("beneficios") },
     { label: "Agenda", href: "#", onClick: () => setTab("agenda") },
+    { label: "Comunicación al socio", href: "#", onClick: () => { setTab("agenda"); setCommsOpen(true); } },
     { label: "Sitio UIC", href: "https://uic-campana.com.ar" },
   ];
 
   const homeCards = posts.slice(0, 6);
 
   // ---------------- Agenda helpers ----------------
-  const iso = (d) => d.toISOString().slice(0, 10);
+  const iso = (d) => localIsoDate(d);
 
   function getEventsForDate(dateStr) {
     return (events || []).filter((e) => e.date === dateStr);
@@ -676,13 +717,14 @@ export default function App() {
               <>
                 <div className="muted" style={{ marginBottom: 8 }}>
                   Se muestran <b>dos meses</b>. Podés avanzar/retroceder de a 2 meses.
+                  Rango: hasta <b>6 años hacia atrás</b> y <b>1 año hacia adelante</b>.
                 </div>
 
                 <div className="pagerRow" style={{ marginTop: 0 }}>
                   <button
                     className="btnSecondary"
                     onClick={() => {
-                      const min = new Date(new Date().getFullYear() - 6, new Date().getMonth(), 1);
+                      const min = agendaMinBase();
                       const next = addMonths(agendaBase, -2);
                       if (next < min) return;
                       loadAgendaForTwoMonths(next);
@@ -699,10 +741,28 @@ export default function App() {
                       return `${a} – ${b}`;
                     })()}
                   </div>
+                  <input
+                    className="input"
+                    type="month"
+                    value={`${agendaBase.getFullYear()}-${String(agendaBase.getMonth() + 1).padStart(2, "0")}`}
+                    onChange={(e) => {
+                      const v = e.target.value;
+                      if (!v) return;
+                      const [yy, mm] = v.split("-").map((x) => parseInt(x, 10));
+                      if (!yy || !mm) return;
+                      const candidate = new Date(yy, mm - 1, 1);
+                      const min = agendaMinBase();
+                      const max = agendaMaxBase();
+                      if (candidate < min || candidate > max) return;
+                      loadAgendaForTwoMonths(candidate);
+                    }}
+                    title="Ir a mes"
+                    style={{ width: 140 }}
+                  />
                   <button
                     className="btnSecondary"
                     onClick={() => {
-                      const max = new Date(new Date().getFullYear() + 2, 11, 1);
+                      const max = agendaMaxBase();
                       const next = addMonths(agendaBase, 2);
                       if (next > max) return;
                       loadAgendaForTwoMonths(next);
@@ -732,29 +792,94 @@ export default function App() {
                 {/* Comunicación al socio (debajo de agenda) */}
                 <div style={{ marginTop: 14 }}>
                   <div className="rowBetween">
-                    <div>
-                      <div className="cardTitle">Comunicación al socio</div>
-                      <div className="cardSub">Mensajes institucionales publicados por el administrador.</div>
+                    <div className="row" style={{ gap: 10, alignItems: "center" }}>
+                      <button
+                        className="btnPrimary"
+                        onClick={() => {
+                          const next = !commsOpen;
+                          setCommsOpen(next);
+                          if (next) loadComms(10);
+                        }}
+                      >
+                        Comunicación al socio
+                        {commsUnseen > 0 && <span className="navBadgeNum">{commsUnseen}</span>}
+                      </button>
+                      <button className="btnSecondary" onClick={() => loadComms(10)} disabled={!commsOpen}>
+                        Actualizar
+                      </button>
                     </div>
-                    <button className="btnSecondary" onClick={() => loadComms(10)}>
-                      Actualizar
-                    </button>
+
+                    {/* Panel admin siempre accesible (no depende de seleccionar un día) */}
+                    <div className="row" style={{ gap: 8, alignItems: "center" }}>
+                      {!isAdmin ? (
+                        <>
+                          <input
+                            className="input"
+                            placeholder="Clave admin"
+                            value={adminToken}
+                            onChange={(e) => setAdminToken(e.target.value)}
+                            style={{ width: 160 }}
+                          />
+                          <button
+                            className="btnSecondary"
+                            onClick={() => {
+                              localStorage.setItem("uic_admin_token", adminToken);
+                              alert("Token guardado en este dispositivo.");
+                            }}
+                          >
+                            Guardar
+                          </button>
+                        </>
+                      ) : (
+                        <>
+                          <button
+                            className="btnSecondary"
+                            onClick={() => {
+                              setCommsOpen(true);
+                              setCommsComposeOpen((v) => !v);
+                            }}
+                          >
+                            {commsComposeOpen ? "Cerrar editor" : "Publicar"}
+                          </button>
+                          <button
+                            className="btnSecondary"
+                            onClick={() => {
+                              localStorage.removeItem("uic_admin_token");
+                              setAdminToken("");
+                              alert("Token eliminado en este dispositivo.");
+                            }}
+                          >
+                            Salir admin
+                          </button>
+                        </>
+                      )}
+                    </div>
                   </div>
 
-                  {(() => {
-                    const latest = comms?.[0];
-                    if (!latest) return <div className="muted" style={{ marginTop: 8 }}>No hay comunicaciones publicadas.</div>;
-                    return (
-                      <div className="eventItem" style={{ marginTop: 10 }}>
-                        <div className="eventTitle">{latest.title}</div>
-                        <div className="muted" style={{ fontSize: 12, marginTop: 2 }}>{latest.createdAt?.slice(0, 10) || ""}</div>
-                        <div className="eventDesc" style={{ whiteSpace: "pre-wrap" }}>{latest.message}</div>
+                  {commsOpen && (
+                    <>
+                      <div className="cardSub" style={{ marginTop: 8 }}>
+                        Mensajes institucionales publicados por el administrador.
                       </div>
-                    );
-                  })()}
 
-                  {isAdmin && <CommCreateForm onPublish={publishComm} />}
+                      {(() => {
+                        const latest = comms?.[0];
+                        if (!latest) return <div className="muted" style={{ marginTop: 8 }}>No hay comunicaciones publicadas.</div>;
+                        return (
+                          <div className="eventItem" style={{ marginTop: 10 }}>
+                            <div className="eventTitle">{latest.title}</div>
+                            <div className="muted" style={{ fontSize: 12, marginTop: 2 }}>{latest.createdAt?.slice(0, 10) || ""}</div>
+                            <div className="eventDesc" style={{ whiteSpace: "pre-wrap" }}>{latest.message}</div>
+                          </div>
+                        );
+                      })()}
+
+                      {isAdmin && commsComposeOpen && <CommCreateForm onPublish={publishComm} />}
+                    </>
+                  )}
                 </div>
+
+
 
                 {selectedDate && (
                   <div className="cardSub" style={{ marginTop: 12 }}>
@@ -826,6 +951,12 @@ export default function App() {
               <div style={{ marginTop: 10 }}>
                 <b>iPhone (PWA):</b> para “instalar” la app, abrí en Safari → Compartir → <i>Agregar a inicio</i>.
               </div>
+              <div style={{ marginTop: 12 }}>
+                <button className="btnPrimary" onClick={hardRefresh}>Forzar actualización</button>
+                <div className="muted" style={{ marginTop: 6, fontSize: 12 }}>
+                  Si el celular no toma cambios, este botón intenta borrar cache y service worker y recargar.
+                </div>
+              </div>
             </div>
           </section>
         )}
@@ -842,7 +973,7 @@ export default function App() {
           Beneficios
         </button>
         <button className={cls("navBtn", tab === "agenda" && "navActive")} onClick={() => setTab("agenda")}>
-          Agenda {badgeCount > 0 && <span className="navBadgeNum">{badgeCount}</span>}
+          Agenda {todayEventsCount > 0 && <span className="navBadgeNum">{todayEventsCount}</span>}
         </button>
         <button className={cls("navBtn", tab === "ajustes" && "navActive")} onClick={() => setTab("ajustes")}>
           Ajustes

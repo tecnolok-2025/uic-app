@@ -63,9 +63,51 @@ const WP_BASE = (process.env.WP_BASE || `${WP_SITE_BASE}/wp-json/wp/v2`).trim();
 const WP_AUTH_B64 = (process.env.WP_AUTH_B64 || "").trim();
 
 // Push (opcional)
-const VAPID_PUBLIC_KEY = (process.env.VAPID_PUBLIC_KEY || "").trim();
-const VAPID_PRIVATE_KEY = (process.env.VAPID_PRIVATE_KEY || "").trim();
-const VAPID_SUBJECT = (process.env.VAPID_SUBJECT || "mailto:admin@example.com").trim();
+// IMPORTANTE:
+// - NO hardcodear claves.
+// - En producción (Render) se deben cargar como Environment Variables.
+// - A veces al copiar/pegar quedan comillas, espacios, saltos de línea o formato base64 (con + / =).
+//   Normalizamos a Base64URL (sin '=') para evitar falsos inválidos.
+function normalizeVapidKey(raw) {
+  if (!raw) return "";
+  let s = String(raw).trim();
+
+  // Si alguien pegó JSON completo por error (ej: {"publicKey":"...","privateKey":"..."})
+  if (s.startsWith("{") && s.endsWith("}")) {
+    try {
+      const obj = JSON.parse(s);
+      if (typeof obj?.publicKey === "string") s = obj.publicKey;
+      else if (typeof obj?.privateKey === "string") s = obj.privateKey;
+    } catch (_) {
+      // ignorar
+    }
+    s = String(s).trim();
+  }
+
+  // Quitar comillas envolventes
+  if ((s.startsWith('"') && s.endsWith('"')) || (s.startsWith("'") && s.endsWith("'"))) {
+    s = s.slice(1, -1);
+  }
+
+  // Quitar espacios/saltos de línea internos
+  s = s.replace(/\s+/g, "");
+
+  // Normalizar base64 -> base64url
+  s = s.replace(/\+/g, "-").replace(/\//g, "_");
+
+  // Quitar padding '=' (web-push exige sin '=')
+  s = s.replace(/=+$/g, "");
+
+  return s;
+}
+
+function isBase64UrlNoPad(s) {
+  return typeof s === "string" && s.length > 0 && /^[A-Za-z0-9\-_]+$/.test(s);
+}
+
+const VAPID_PUBLIC_KEY = normalizeVapidKey(process.env.VAPID_PUBLIC_KEY);
+const VAPID_PRIVATE_KEY = normalizeVapidKey(process.env.VAPID_PRIVATE_KEY);
+const VAPID_SUBJECT = String(process.env.VAPID_SUBJECT || "mailto:admin@example.com").trim();
 
 /* ----------------------------- Agenda ---------------------------------- */
 
@@ -179,16 +221,27 @@ app.use(
 
 let PUSH_ENABLED = false;
 
-try {
-  if (VAPID_PUBLIC_KEY && VAPID_PRIVATE_KEY) {
+if (!VAPID_PUBLIC_KEY || !VAPID_PRIVATE_KEY) {
+  console.warn("ℹ️  Push no configurado (faltan VAPID keys).");
+} else if (!isBase64UrlNoPad(VAPID_PUBLIC_KEY) || !isBase64UrlNoPad(VAPID_PRIVATE_KEY)) {
+  // Ayuda de diagnóstico SIN exponer secretos
+  console.warn(
+    "⚠️  VAPID inválido, push deshabilitado: las keys no son Base64URL (sin '=').",
+    `public.len=${VAPID_PUBLIC_KEY?.length || 0} private.len=${VAPID_PRIVATE_KEY?.length || 0}`
+  );
+  PUSH_ENABLED = false;
+} else {
+  // Log de diagnóstico (solo public key parcial)
+  console.log(
+    `🔐 VAPID cargado: public.len=${VAPID_PUBLIC_KEY.length} public.preview=${VAPID_PUBLIC_KEY.slice(0, 10)}...`
+  );
+  try {
     webpush.setVapidDetails(VAPID_SUBJECT, VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY);
     PUSH_ENABLED = true;
-  } else {
-    console.warn("ℹ️  Push no configurado (faltan VAPID keys).");
+  } catch (e) {
+    console.warn("⚠️  VAPID inválido, push deshabilitado:", e?.message || e);
+    PUSH_ENABLED = false;
   }
-} catch (e) {
-  console.warn("⚠️  VAPID inválido, push deshabilitado:", e?.message || e);
-  PUSH_ENABLED = false;
 }
 
 /* ----------------------------- Helpers ---------------------------------- */
