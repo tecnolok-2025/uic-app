@@ -80,6 +80,7 @@ export default function App() {
     return new Date(n.getFullYear(), n.getMonth(), 1);
   });
   const [selectedDate, setSelectedDate] = useState(null);
+  const [agendaError, setAgendaError] = useState("");
   // Admin token: se considera "admin" SOLO si el token está guardado (persistido) en el dispositivo.
   // Evita el bug donde al escribir la primera letra en "Clave admin" cambia de panel automáticamente.
   const [adminToken, setAdminToken] = useState(() => (localStorage.getItem("uic_admin_token") || "").trim());
@@ -95,6 +96,53 @@ export default function App() {
   const [commsMeta, setCommsMeta] = useState({ updatedAt: null, count: 0 });
   const [commsUnseen, setCommsUnseen] = useState(0);
   const [commsComposeOpen, setCommsComposeOpen] = useState(false);
+
+  // Socios (directorio)
+  const [socios, setSocios] = useState([]);
+  const [sociosCategory, setSociosCategory] = useState("todos"); // todos | logistica | fabricacion | servicios
+  const [sociosSearchDraft, setSociosSearchDraft] = useState("");
+  const [sociosSearchQuery, setSociosSearchQuery] = useState("");
+  const [sociosPager, setSociosPager] = useState({ page: 1, per_page: 25, has_more: false, next_page: null, total: 0 });
+  const [sociosLoading, setSociosLoading] = useState(false);
+  const [sociosError, setSociosError] = useState("");
+  const [sociosFormOpen, setSociosFormOpen] = useState(false);
+  const [sociosFormMode, setSociosFormMode] = useState("create"); // create | edit
+  const [sociosEditing, setSociosEditing] = useState(null);
+
+const [socioForm, setSocioForm] = useState({
+  member_no: "",
+  company_name: "",
+  category: "fabricacion",
+  expertise: "",
+  website_url: "",
+  social_url: "",
+});
+const [sociosSaving, setSociosSaving] = useState(false);
+const [sociosFormError, setSociosFormError] = useState("");
+
+useEffect(() => {
+  if (!sociosFormOpen) return;
+  setSociosFormError("");
+  if (sociosFormMode === "edit" && sociosEditing) {
+    setSocioForm({
+      member_no: String(sociosEditing.member_no ?? ""),
+      company_name: String(sociosEditing.company_name ?? ""),
+      category: String(sociosEditing.category ?? "fabricacion"),
+      expertise: String(sociosEditing.expertise ?? ""),
+      website_url: String(sociosEditing.website_url ?? ""),
+      social_url: String(sociosEditing.social_url ?? ""),
+    });
+  } else {
+    setSocioForm({
+      member_no: "",
+      company_name: "",
+      category: "fabricacion",
+      expertise: "",
+      website_url: "",
+      social_url: "",
+    });
+  }
+}, [sociosFormOpen, sociosFormMode, sociosEditing]);
 
   function markCommsSeen(updatedAt) {
     const v = (updatedAt || new Date().toISOString()).toString();
@@ -213,6 +261,13 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab]);
 
+  useEffect(() => {
+    if (tab !== "socios") return;
+    setSociosFormOpen(false);
+    loadSocios({ page: 1, append: false });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tab, sociosCategory, sociosSearchQuery]);
+
 
   const quickLinks = [
     { label: "Hacete socio", href: "https://uic-campana.com.ar/hacete-socio/" },
@@ -220,6 +275,8 @@ export default function App() {
     { label: "Beneficios", href: "#", onClick: () => setTab("beneficios") },
     { label: "Agenda", href: "#", onClick: () => setTab("agenda") },
     { label: "Comunicación al socio", href: "#", onClick: () => { setTab("comunicacion"); } },
+    { label: "Socios", href: "#", onClick: () => { setTab("socios"); } },
+    { label: "Próximamente", href: "#", disabled: true },
     { label: "Sitio UIC", href: "https://uic-campana.com.ar" },
   ];
 
@@ -284,13 +341,19 @@ async function loadAgendaForTwoMonths(baseDate) {
     // no crítico
   }
 
-  const data = await apiGet(`/events?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`);
-  const items = data.items || [];
-  setEvents(items);
-  setEventsMeta((m) => ({ ...m, updatedAt: data.updatedAt || m.updatedAt }));
+  try {
+    const data = await apiGet(`/events?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`);
+    const items = data.items || [];
+    setEvents(items);
+    setEventsMeta((m) => ({ ...m, updatedAt: data.updatedAt || m.updatedAt }));
 
-  const today = localIsoDate(new Date());
-  setTodayEventsCount(items.filter((ev) => ev.date === today).length);
+    const today = localIsoDate(new Date());
+    setTodayEventsCount(items.filter((ev) => ev.date === today).length);
+  } catch (e) {
+    setEvents([]);
+    setTodayEventsCount(0);
+    setAgendaError(String(e?.message || e));
+  }
 }
 
 async function createEvent(payload) {
@@ -423,6 +486,126 @@ async function createEvent(payload) {
     );
   }
 
+  function SocioForm({ mode, initial, onSave, onCancel, onDelete }) {
+    const [memberNo, setMemberNo] = useState(initial?.member_no ? String(initial.member_no) : "");
+    const [companyName, setCompanyName] = useState(initial?.company_name || "");
+    const [category, setCategory] = useState(initial?.category || "servicios");
+    const [expertise, setExpertise] = useState(initial?.expertise || "");
+    const [websiteUrl, setWebsiteUrl] = useState(initial?.website_url || "");
+    const [socialUrl, setSocialUrl] = useState(initial?.social_url || "");
+    const [saving, setSaving] = useState(false);
+
+    const isEdit = mode === "edit";
+
+    async function submit(e) {
+      e.preventDefault();
+      const n = parseInt(memberNo, 10);
+      if (!Number.isFinite(n) || n <= 0) {
+        alert("Ingresá un número de socio válido.");
+        return;
+      }
+      if (!String(companyName || "").trim()) {
+        alert("Ingresá el nombre de la empresa/persona.");
+        return;
+      }
+      setSaving(true);
+      try {
+        await onSave({
+          memberNo: n,
+          companyName: String(companyName).trim(),
+          category,
+          expertise: String(expertise || "").trim(),
+          websiteUrl: String(websiteUrl || "").trim(),
+          socialUrl: String(socialUrl || "").trim(),
+        });
+      } catch (e) {
+        alert(e?.message || "No se pudo guardar");
+      } finally {
+        setSaving(false);
+      }
+    }
+
+    return (
+      <div className="card" style={{ marginTop: 12 }}>
+        <div className="row" style={{ justifyContent: "space-between", alignItems: "center" }}>
+          <h3 style={{ margin: 0 }}>{isEdit ? "Editar socio" : "Agregar socio"}</h3>
+          <button className="btnGhost" onClick={onCancel} type="button">
+            Cerrar
+          </button>
+        </div>
+
+        <form onSubmit={submit} className="form" style={{ marginTop: 10 }}>
+          <div className="formRow">
+            <label>N° socio</label>
+            <input className="input" value={memberNo} onChange={(e) => setMemberNo(e.target.value)} inputMode="numeric" />
+          </div>
+          <div className="formRow">
+            <label>Empresa / persona</label>
+            <input className="input" value={companyName} onChange={(e) => setCompanyName(e.target.value)} />
+          </div>
+          <div className="formRow">
+            <label>Rubro</label>
+            <select className="input" value={category} onChange={(e) => setCategory(e.target.value)}>
+              <option value="logistica">Logística</option>
+              <option value="fabricacion">Fabricación</option>
+              <option value="servicios">Servicios</option>
+            </select>
+          </div>
+          <div className="formRow">
+            <label>Especialidad (breve)</label>
+            <input
+              className="input"
+              value={expertise}
+              onChange={(e) => setExpertise(e.target.value)}
+              placeholder="Ej: metalmecánica, logística, consultoría..."
+            />
+          </div>
+          <div className="formRow">
+            <label>Web (opcional)</label>
+            <input className="input" value={websiteUrl} onChange={(e) => setWebsiteUrl(e.target.value)} placeholder="https://..." />
+          </div>
+          <div className="formRow">
+            <label>Red social (opcional)</label>
+            <input
+              className="input"
+              value={socialUrl}
+              onChange={(e) => setSocialUrl(e.target.value)}
+              placeholder="https://instagram.com/..."
+            />
+          </div>
+
+          <div className="row" style={{ gap: 10, marginTop: 12 }}>
+            <button className="btnPrimary" disabled={saving}>
+              {saving ? "Guardando…" : "Guardar"}
+            </button>
+            {isEdit && (
+              <button
+                type="button"
+                className="btnDanger"
+                disabled={saving}
+                onClick={async () => {
+                  if (!onDelete) return;
+                  const ok = confirm("¿Eliminar este socio del directorio?");
+                  if (!ok) return;
+                  setSaving(true);
+                  try {
+                    await onDelete();
+                  } catch (e) {
+                    alert(e?.message || "No se pudo eliminar");
+                  } finally {
+                    setSaving(false);
+                  }
+                }}
+              >
+                Eliminar
+              </button>
+            )}
+          </div>
+        </form>
+      </div>
+    );
+  }
+
   function CommCreateForm({ onPublish }) {
     const [title, setTitle] = useState("");
     const [message, setMessage] = useState("");
@@ -506,6 +689,145 @@ async function createEvent(payload) {
     if (j.updatedAt) markCommsSeen(j.updatedAt);
   }
 
+
+  /* ----------------------------- Socios -------------------------------- */
+
+  async function loadSocios(opts = {}) {
+    const { page = 1, perPage = 25, append = false, category = sociosCategory, q = sociosSearchQuery } = opts;
+
+    if (!canUseApi) {
+      setSociosError("Falta configurar VITE_API_BASE en el frontend.");
+      return;
+    }
+
+    setSociosLoading(true);
+    setSociosError("");
+    try {
+      const qs = new URLSearchParams();
+      qs.set("page", String(page));
+      qs.set("per_page", String(perPage));
+      if (category && category !== "todos") qs.set("category", category);
+      if (q) qs.set("q", q);
+
+      const data = await apiGet(`/socios?${qs.toString()}`);
+      const items = Array.isArray(data.items) ? data.items : [];
+
+      setSocios((prev) => (append ? [...(prev || []), ...items] : items));
+      setSociosPager({
+        page: data.page || page,
+        per_page: data.per_page || perPage,
+        has_more: Boolean(data.has_more),
+        next_page: data.next_page || null,
+        total: Number.isFinite(data.total) ? data.total : items.length,
+      });
+    } catch (e) {
+      if (!append) setSocios([]);
+      setSociosError(String(e?.message || e));
+    } finally {
+      setSociosLoading(false);
+    }
+  }
+
+  function openSocioForm(mode, socio = null) {
+    setSociosFormMode(mode);
+    setSociosEditing(socio);
+    setSociosFormOpen(true);
+  }
+
+  async function saveSocio(payload) {
+    if (!canUseApi) throw new Error("Falta configurar VITE_API_BASE en el frontend.");
+    if (!isAdmin) throw new Error("Acceso denegado (clave admin).");
+
+    const headers = {
+      "Content-Type": "application/json",
+      "x-admin-token": adminToken,
+    };
+
+    if (sociosFormMode === "edit" && sociosEditing?.id) {
+      const r = await fetch(`${API_BASE}/socios/${encodeURIComponent(sociosEditing.id)}`, {
+        method: "PUT",
+        headers,
+        body: JSON.stringify(payload),
+      });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j.error || j.message || `HTTP ${r.status}`);
+      return { ok: true };
+    }
+
+    const r = await fetch(`${API_BASE}/socios`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(payload),
+    });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(j.error || j.message || `HTTP ${r.status}`);
+    return j;
+  }
+
+  async function deleteSocio(id) {
+    if (!canUseApi) throw new Error("Falta configurar VITE_API_BASE en el frontend.");
+    if (!isAdmin) throw new Error("Acceso denegado (clave admin).");
+    const r = await fetch(`${API_BASE}/socios/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+      headers: { "x-admin-token": adminToken },
+    });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(j.error || j.message || `HTTP ${r.status}`);
+    return j;
+  }
+
+function prettySocioCategory(cat) {
+  const c = String(cat || "").toLowerCase();
+  if (c === "logistica") return "Logística";
+  if (c === "servicios") return "Servicios";
+  return "Fabricación";
+}
+
+function normalizeUrl(u) {
+  const s = String(u || "").trim();
+  if (!s) return "";
+  if (s.startsWith("http://") || s.startsWith("https://")) return s;
+  return `https://${s}`;
+}
+
+function socioHref(s) {
+  const w = normalizeUrl(s?.website_url);
+  const so = normalizeUrl(s?.social_url);
+  return w || so || "";
+}
+
+async function submitSocioForm() {
+  try {
+    setSociosFormError("");
+    setSociosSaving(true);
+
+    const memberNo = parseInt(String(socioForm.member_no || "").trim(), 10);
+    if (!Number.isFinite(memberNo) || memberNo <= 0) throw new Error("Ingresá un Nº de socio válido.");
+    const companyName = String(socioForm.company_name || "").trim();
+    if (!companyName) throw new Error("Ingresá el nombre de la empresa.");
+
+    const payload = {
+      member_no: memberNo,
+      company_name: companyName,
+      category: String(socioForm.category || "fabricacion"),
+      expertise: String(socioForm.expertise || "").trim(),
+      website_url: normalizeUrl(socioForm.website_url),
+      social_url: normalizeUrl(socioForm.social_url),
+    };
+
+    await saveSocio(payload);
+    setSociosFormOpen(false);
+    setSociosEditing(null);
+    // recargar respetando filtros actuales
+    await loadSocios({ page: 1, append: false, category: sociosCategory, q: sociosSearchQuery });
+  } catch (e) {
+    setSociosFormError(String(e?.message || e));
+  } finally {
+    setSociosSaving(false);
+  }
+}
+
+
   return (
     <div className="app">
       <header className="topbar">
@@ -534,9 +856,14 @@ async function createEvent(payload) {
                 {quickLinks.map((x) => (
                   <a
                     key={x.label}
-                    className="quickTile"
+                    className={cls("quickTile", x.disabled && "quickTileDisabled")}
                     href={x.href}
+                    aria-disabled={x.disabled ? "true" : "false"}
                     onClick={(e) => {
+                      if (x.disabled) {
+                        e.preventDefault();
+                        return;
+                      }
                       if (x.onClick) {
                         e.preventDefault();
                         x.onClick();
@@ -965,7 +1292,244 @@ async function createEvent(payload) {
           </section>
         )}
 
-        {tab === "ajustes" && (
+        
+{tab === "socios" && (
+  <main className="content">
+    <section className="card">
+      <div className="rowBetween">
+        <div>
+          <div className="cardTitle">Socios UIC</div>
+          <div className="cardSub">
+            Directorio de empresas socias. Se muestra solo Nº de socio y empresa. Tocá el nombre para abrir su web o red social (si está cargada).
+          </div>
+        </div>
+        {isAdmin && (
+          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            <button className="btnSmall" onClick={() => openSocioForm("create")}>Nuevo socio</button>
+          </div>
+        )}
+      </div>
+
+      <div className="filters">
+        {[
+          { key: "todos", label: "Todos" },
+          { key: "logistica", label: "Logística" },
+          { key: "fabricacion", label: "Fabricación" },
+          { key: "servicios", label: "Servicios" },
+        ].map((c) => (
+          <button
+            key={c.key}
+            className={sociosCategory === c.key ? "pill pillActive" : "pill"}
+            onClick={() => {
+              setSociosCategory(c.key);
+              loadSocios({ page: 1, append: false, category: c.key, q: sociosSearchQuery });
+            }}
+          >
+            {c.label}
+          </button>
+        ))}
+      </div>
+
+      <div className="searchRow">
+        <input
+          className="input"
+          placeholder="Buscar por empresa (ej: Tecno)"
+          value={sociosSearchDraft}
+          onChange={(e) => setSociosSearchDraft(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              const q = sociosSearchDraft.trim();
+              setSociosSearchQuery(q);
+              loadSocios({ page: 1, append: false, category: sociosCategory, q });
+            }
+          }}
+        />
+        <button
+          className="btnPrimary"
+          onClick={() => {
+            const q = sociosSearchDraft.trim();
+            setSociosSearchQuery(q);
+            loadSocios({ page: 1, append: false, category: sociosCategory, q });
+          }}
+        >
+          Buscar
+        </button>
+        {sociosSearchQuery ? (
+          <button
+            className="btnGhost"
+            onClick={() => {
+              setSociosSearchDraft("");
+              setSociosSearchQuery("");
+              loadSocios({ page: 1, append: false, category: sociosCategory, q: "" });
+            }}
+          >
+            Limpiar
+          </button>
+        ) : null}
+      </div>
+
+      {sociosError ? <div className="muted">Error: {sociosError}</div> : null}
+      {sociosLoading ? <div className="muted">Cargando socios…</div> : null}
+
+      {!sociosLoading && !sociosError ? (
+        <div className="sociosList">
+          {socios.length === 0 ? (
+            <div className="muted">No hay socios para mostrar con esos filtros.</div>
+          ) : (
+            socios.map((s) => {
+              const href = socioHref(s);
+              return (
+                <div className="socioRow" key={s.id}>
+                  <div className="socioMain">
+                    <div className="socioTop">
+                      <span className="socioNo">{s.member_no}</span>
+                      {href ? (
+                        <a className="socioLink" href={href} target="_blank" rel="noreferrer">
+                          {s.company_name}
+                        </a>
+                      ) : (
+                        <span className="socioLinkDisabled">{s.company_name}</span>
+                      )}
+                    </div>
+                    <div className="socioMeta">
+                      {prettySocioCategory(s.category)}
+                      {s.expertise ? ` • ${s.expertise}` : ""}
+                      {!href ? " • (sin web/red cargada)" : ""}
+                    </div>
+                  </div>
+
+                  {isAdmin ? (
+                    <div className="socioActions">
+                      <button className="btnSmall" onClick={() => openSocioForm("edit", s)}>Editar</button>
+                      <button
+                        className="btnDanger"
+                        onClick={async () => {
+                          const ok = window.confirm(`¿Eliminar al socio ${s.member_no} – ${s.company_name}?`);
+                          if (!ok) return;
+                          await deleteSocio(s.id);
+                          await loadSocios({ page: 1, append: false, category: sociosCategory, q: sociosSearchQuery });
+                        }}
+                      >
+                        Eliminar
+                      </button>
+                    </div>
+                  ) : null}
+                </div>
+              );
+            })
+          )}
+        </div>
+      ) : null}
+
+      {!sociosLoading && sociosPager?.has_more ? (
+        <div style={{ marginTop: 10 }}>
+          <button
+            className="btnGhost"
+            onClick={() =>
+              loadSocios({
+                page: sociosPager.next_page || sociosPager.page + 1,
+                perPage: sociosPager.per_page,
+                append: true,
+                category: sociosCategory,
+                q: sociosSearchQuery,
+              })
+            }
+          >
+            Cargar más
+          </button>
+        </div>
+      ) : null}
+
+      {sociosFormOpen ? (
+        <div className="modalOverlay" onClick={() => setSociosFormOpen(false)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <div className="modalTitle">{sociosFormMode === "edit" ? "Editar socio" : "Nuevo socio"}</div>
+            <div className="modalSub">Solo se publican Nº de socio y Empresa. Web/Red social son enlaces.</div>
+
+            {sociosFormError ? <div className="muted">⚠ {sociosFormError}</div> : null}
+
+            <div className="formGrid">
+              <label className="formLabel">
+                Nº de socio
+                <input
+                  className="input"
+                  value={socioForm.member_no}
+                  onChange={(e) => setSocioForm((p) => ({ ...p, member_no: e.target.value }))}
+                  placeholder="Ej: 101"
+                  disabled={sociosFormMode === "edit"}
+                />
+              </label>
+
+              <label className="formLabel">
+                Empresa
+                <input
+                  className="input"
+                  value={socioForm.company_name}
+                  onChange={(e) => setSocioForm((p) => ({ ...p, company_name: e.target.value }))}
+                  placeholder="Razón social"
+                />
+              </label>
+
+              <label className="formLabel">
+                Clasificación
+                <select
+                  className="input"
+                  value={socioForm.category}
+                  onChange={(e) => setSocioForm((p) => ({ ...p, category: e.target.value }))}
+                >
+                  <option value="fabricacion">Fabricación</option>
+                  <option value="logistica">Logística</option>
+                  <option value="servicios">Servicios</option>
+                </select>
+              </label>
+
+              <label className="formLabel">
+                Expertise (corto)
+                <input
+                  className="input"
+                  value={socioForm.expertise}
+                  onChange={(e) => setSocioForm((p) => ({ ...p, expertise: e.target.value }))}
+                  placeholder="Ej: automatización industrial"
+                />
+              </label>
+
+              <label className="formLabel">
+                Web (URL)
+                <input
+                  className="input"
+                  value={socioForm.website_url}
+                  onChange={(e) => setSocioForm((p) => ({ ...p, website_url: e.target.value }))}
+                  placeholder="https://..."
+                />
+              </label>
+
+              <label className="formLabel">
+                Red social (URL)
+                <input
+                  className="input"
+                  value={socioForm.social_url}
+                  onChange={(e) => setSocioForm((p) => ({ ...p, social_url: e.target.value }))}
+                  placeholder="https://instagram.com/..."
+                />
+              </label>
+            </div>
+
+            <div className="rowEnd">
+              <button className="btnGhost" onClick={() => setSociosFormOpen(false)} disabled={sociosSaving}>
+                Cancelar
+              </button>
+              <button className="btnPrimary" onClick={submitSocioForm} disabled={sociosSaving}>
+                {sociosSaving ? "Guardando…" : "Guardar"}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+    </section>
+  </main>
+)}
+{tab === "ajustes" && (
           <section className="card">
             <div className="cardTitle">Ajustes</div>
             <div className="muted">

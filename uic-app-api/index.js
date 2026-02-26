@@ -181,8 +181,178 @@ const DB_SSL = String(process.env.DATABASE_SSL || "true").trim().toLowerCase() !
 const EVENTS_KEEP_DAYS = Math.max(parseInt(process.env.EVENTS_KEEP_DAYS || "400", 10) || 400, 30);
 const COMMS_KEEP = Math.min(Math.max(parseInt(process.env.COMMS_KEEP || "50", 10) || 50, 1), 200);
 
+// Socios (directorio)
+const SOCIOS_KEEP = Math.min(Math.max(parseInt(process.env.SOCIOS_KEEP || "500", 10) || 500, 50), 5000);
+
 let dbReady = false;
 let pool = null;
+
+// Fallback JSON para socios (si no hay DB)
+const SOCIOS_FILE = (process.env.SOCIOS_FILE || path.join(__dirname, "data", "socios.json")).trim();
+
+function readSociosStore() {
+  try {
+    const raw = fs.readFileSync(SOCIOS_FILE, "utf-8");
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed?.items)) {
+      return {
+        items: parsed.items,
+        updatedAt: parsed.updatedAt || new Date().toISOString(),
+      };
+    }
+  } catch (_) {}
+  return { items: [], updatedAt: new Date().toISOString() };
+}
+
+function writeSociosStore(store) {
+  ensureDir(path.dirname(SOCIOS_FILE));
+  fs.writeFileSync(SOCIOS_FILE, JSON.stringify(store, null, 2), "utf-8");
+}
+
+let SOCIOS_STORE = readSociosStore();
+
+function touchSociosStore() {
+  SOCIOS_STORE.updatedAt = new Date().toISOString();
+  writeSociosStore(SOCIOS_STORE);
+}
+
+function normalizeUrl(u) {
+  const s = String(u || "").trim();
+  if (!s) return "";
+  if (/^https?:\/\//i.test(s)) return s;
+  return `https://${s}`;
+}
+
+function guessSocioCategory(companyName) {
+  const n = String(companyName || "").toLowerCase();
+  const has = (re) => re.test(n);
+
+  // Logística / transporte / portuario
+  if (
+    has(/transporte|logisti|camion|camioner|bus\b|ruta\b|portuar|naval|astillero|fluvial|puerto/) ||
+    has(/master bus|bus pla/)
+  ) {
+    return { category: "logistica", expertise: "Logística y transporte" };
+  }
+
+  // Servicios (seguros, estudios, consultoría, hotelería, inmobiliaria, brokers)
+  if (
+    has(/servicio|seguro|estudio|consult|broker|hotel|inmobiliaria|cooperativa|valerio|orbe|villaberde/) ||
+    has(/colmena|plan\s*ercitec/) ||
+    has(/affinity/) ||
+    has(/praxis finanzas/)
+  ) {
+    return { category: "servicios", expertise: "Servicios profesionales" };
+  }
+
+  // Fabricación / industria (default)
+  if (
+    has(/industr|metal|quim|plast|maderer|rodamiento|hierro|gases|abertura|plegado|montaje|suelos|roca(d)?\b|technik|ciani|titania|ultracolor|indapco|inteco|alucam|dipsol|dem\b|quimigas/) ||
+    has(/insadi|technia|tecmaco|nepar|suppress|pastoriza|comibor|qbox|kiub|ecogoal|inventiva/) ||
+    has(/interacero|integral\s*k/)
+  ) {
+    return { category: "fabricacion", expertise: "Industria y manufactura" };
+  }
+
+  return { category: "servicios", expertise: "Servicios" };
+}
+
+// Seed inicial de socios (solo número + empresa; sin CUIT/email por confidencialidad)
+const SOCIOS_SEED = [
+  { member_no: 1, company_name: "INSADI S.A." },
+  { member_no: 3, company_name: "MOTORES ELECTRICOS Y COMANDOS SA" },
+  { member_no: 4, company_name: "JUSA S.A." },
+  { member_no: 7, company_name: "JCO S.R.L." },
+  { member_no: 9, company_name: "JM PLEGADOS" },
+  { member_no: 12, company_name: "MADERERA CAMPANA SA" },
+  { member_no: 13, company_name: "BUS PLA" },
+  { member_no: 16, company_name: "MIGUELES CARLOS SA" },
+  { member_no: 20, company_name: "AMEGHINO SERVICIOS NAVAL E INDUSTRIAL SA" },
+  { member_no: 21, company_name: "NORBERTO D. RIVERO S.A./TITANIA" },
+  { member_no: 22, company_name: "TECHNIA S.A." },
+  { member_no: 37, company_name: "SUELOS ARGENTINOS - SASA SA" },
+  { member_no: 38, company_name: "EXPO ARGENTINA S.R.L" },
+  { member_no: 41, company_name: "RODBUL RODAMIENTOS" },
+  { member_no: 42, company_name: "AUDITEC ARGENTINA SA" },
+  { member_no: 43, company_name: "TRANSPORTES PADILLA S.A" },
+  { member_no: 44, company_name: "TECMACO INTEGRAL SA" },
+  { member_no: 46, company_name: "LEOPOLDO CIANI E HIJOS S.A." },
+  { member_no: 50, company_name: "RIO MANSO S.A." },
+  { member_no: 51, company_name: "GASES CAMPANA SA" },
+  { member_no: 53, company_name: "HIERROS CAMPANA SA" },
+  { member_no: 54, company_name: "ULTRACOLOR SA" },
+  { member_no: 56, company_name: "MASTER BUS SA" },
+  { member_no: 58, company_name: "INDAPCO SA" },
+  { member_no: 67, company_name: "MONTAJES INTERACERO SA" },
+  { member_no: 69, company_name: "SANTA CHITA EDUARDO" },
+  { member_no: 72, company_name: "RZ SERVICIOS INDUSTRIALES SA" },
+  { member_no: 77, company_name: "ALDO DI LALLO SA" },
+  { member_no: 78, company_name: "MONTAJES NEPAR SA" },
+  { member_no: 81, company_name: "INTEGER PRAESTATIO SRL" },
+  { member_no: 84, company_name: "INDUCCIÖN SRL" },
+  { member_no: 88, company_name: "AVILA ARGENTINA SA" },
+  { member_no: 92, company_name: "PLAZA HOTEL CAMPANA SA" },
+  { member_no: 101, company_name: "TECNO LOGISTI-K SA" },
+  { member_no: 103, company_name: "ALUCAM ABERTURAS" },
+  { member_no: 115, company_name: "INDUSTRIAS QUIMICAS DEM SA" },
+  { member_no: 128, company_name: "QUIMIGAS SAIC" },
+  { member_no: 130, company_name: "INGECAMP SA" },
+  { member_no: 133, company_name: "C Y L ELECTROMATERIAL SA" },
+  { member_no: 140, company_name: "SIZNO TECHNOLOGIE" },
+  { member_no: 146, company_name: "EL HOGAR FERRETERIA" },
+  { member_no: 148, company_name: "METAL TECHNIK SA" },
+  { member_no: 152, company_name: "VILENI SRL" },
+  { member_no: 164, company_name: "NOVASEN S.A." },
+  { member_no: 168, company_name: "I-MEGA INGENIERIA" },
+  { member_no: 169, company_name: "DIPSOL SRL" },
+  { member_no: 173, company_name: "INMOBILIARIA CADEMA SA" },
+  { member_no: 177, company_name: "BERSABAR SA" },
+  { member_no: 180, company_name: "QBOX" },
+  { member_no: 185, company_name: "RAYBITE INGENIERIA" },
+  { member_no: 187, company_name: "INTECO ARGENTINA" },
+  { member_no: 195, company_name: "ALQUIVIAL" },
+  { member_no: 197, company_name: "TRIMSA SRL" },
+  { member_no: 198, company_name: "SUPPRESS" },
+  { member_no: 200, company_name: "LA PASTORIZA S.A." },
+  { member_no: 201, company_name: "ALTOS DE VILLA NUEVA SRL" },
+  { member_no: 203, company_name: "ASTILLERO ALNAVI" },
+  { member_no: 204, company_name: "SERVICIOS INTEGRADOS PORTUARIOS" },
+  { member_no: 205, company_name: "CONSTELMEC S.A." },
+  { member_no: 207, company_name: "CAMPASI S.A.S." },
+  { member_no: 210, company_name: "SWA" },
+  { member_no: 211, company_name: "VILLABERDE SEGUROS" },
+  { member_no: 215, company_name: "TEGA DESARROLLO S.R.L." },
+  { member_no: 216, company_name: "GRUPO BAUTEC S.A." },
+  { member_no: 217, company_name: "INTEGRAL K" },
+  { member_no: 221, company_name: "PARQUE PYME SA" },
+  { member_no: 223, company_name: "ESTUDIO CONTABLE FERNANDO FERREYRA" },
+  { member_no: 224, company_name: "IPR PLASTICOS REFORZADOS" },
+  { member_no: 225, company_name: "INFO VALERIO" },
+  { member_no: 226, company_name: "CONEXIÓN CONSULTORA (Tte. Fluvial Bs As Uruguay)" },
+  { member_no: 227, company_name: "COOPERATIVA ELECTRICA ZARATE" },
+  { member_no: 228, company_name: "TALLER METALURGICO RIMA SA" },
+  { member_no: 229, company_name: "TECHNICI SRL" },
+  { member_no: 230, company_name: "PRAXIS FINANZAS SA" },
+  { member_no: 231, company_name: "BELLCOM" },
+  { member_no: 232, company_name: "COMIBOR SA" },
+  { member_no: 233, company_name: "Quadecon Industrial Services S.A." },
+  { member_no: 234, company_name: "AFFINITY BROKER S.A." },
+  { member_no: 235, company_name: "RUBEN DOMENECH" },
+  { member_no: 236, company_name: "FERRARO Y ASOCIADOS SRL" },
+  { member_no: 237, company_name: "CHETANA" },
+  { member_no: 238, company_name: "PAPELITOS GRAFICA" },
+  { member_no: 239, company_name: "S & S MMONTAJES INDUSTRIALES SA" },
+  { member_no: 240, company_name: "ROCAD 3D SRL" },
+  { member_no: 241, company_name: "KIUB SA" },
+  { member_no: 242, company_name: "INVENTIVA" },
+  { member_no: 243, company_name: "ECOGOAL" },
+  { member_no: 244, company_name: "GRUPO SOLPER" },
+  { member_no: 245, company_name: "DEBORA BIAIN - COLMENA 360" },
+  { member_no: 246, company_name: "MARCELO VILA - PLAN ERCITEC" },
+  { member_no: 247, company_name: "PECANTECH" },
+  { member_no: 248, company_name: "ESTUDIO ORBE DE SERVICIOS EMPRESARIOS SA" },
+  { member_no: 249, company_name: "HOTEL RUTA 6" },
+];
 
 async function initDb() {
   if (!DATABASE_URL) return;
@@ -219,12 +389,75 @@ async function initDb() {
     `);
     await pool.query(`CREATE INDEX IF NOT EXISTS uic_comms_created_idx ON uic_comms(created_at)`);
 
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS uic_socios (
+        id TEXT PRIMARY KEY,
+        member_no INT NOT NULL UNIQUE,
+        company_name TEXT NOT NULL,
+        category TEXT NOT NULL,
+        expertise TEXT DEFAULT '',
+        website_url TEXT DEFAULT '',
+        social_url TEXT DEFAULT '',
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `);
+    await pool.query(`CREATE INDEX IF NOT EXISTS uic_socios_category_idx ON uic_socios(category)`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS uic_socios_name_idx ON uic_socios(LOWER(company_name))`);
+
     dbReady = true;
     console.log("✅ DB externa habilitada (DATABASE_URL). Persistencia OK.");
   } catch (e) {
     dbReady = false;
     console.log("⚠️ DB externa no disponible, usando JSON local:", e?.message || e);
   }
+}
+
+async function seedSociosIfEmpty() {
+  // DB
+  if (dbReady) {
+    try {
+      const r = await pool.query("SELECT COUNT(*)::int AS count FROM uic_socios");
+      const count = r.rows?.[0]?.count || 0;
+      if (count > 0) return;
+
+      for (const s of SOCIOS_SEED) {
+        const g = guessSocioCategory(s.company_name);
+        const id = `soc_${s.member_no}`;
+        await pool.query(
+          `INSERT INTO uic_socios (id, member_no, company_name, category, expertise, website_url, social_url)
+           VALUES ($1,$2,$3,$4,$5,$6,$7)
+           ON CONFLICT (member_no) DO NOTHING`,
+          [id, s.member_no, s.company_name, g.category, g.expertise || "", "", ""]
+        );
+      }
+      console.log(`✅ Socios seed inicial cargado (${SOCIOS_SEED.length}).`);
+      return;
+    } catch (e) {
+      console.log("⚠️ seedSociosIfEmpty DB error:", e?.message || e);
+    }
+  }
+
+  // JSON fallback
+  try {
+    if ((SOCIOS_STORE.items || []).length > 0) return;
+    SOCIOS_STORE.items = SOCIOS_SEED.map((s) => {
+      const g = guessSocioCategory(s.company_name);
+      return {
+        id: `soc_${s.member_no}`,
+        member_no: s.member_no,
+        company_name: s.company_name,
+        category: g.category,
+        expertise: g.expertise || "",
+        website_url: "",
+        social_url: "",
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      };
+    });
+    touchSociosStore();
+    console.log(`✅ Socios seed inicial cargado en JSON (${SOCIOS_SEED.length}).`);
+  } catch (_) {}
 }
 
 
@@ -502,7 +735,7 @@ app.get("/wp/posts", async (req, res) => {
   const page = Math.max(parseInt(req.query.page || "1", 10) || 1, 1);
   const perPage = Math.min(Math.max(parseInt(req.query.per_page || "6", 10) || 6, 1), 20);
   const limitTotal = Math.min(Math.max(parseInt(req.query.limit_total || "100", 10) || 100, 1), 300);
-  const q = (req.query.q || "").toString().trim().toLowerCase();
+  const q = (req.query.search || req.query.q || "").toString().trim().toLowerCase();
   const category = (req.query.category || "").toString().trim().toLowerCase();
 
   try {
@@ -820,6 +1053,268 @@ app.delete("/comms/:id", requireAdmin, async (req, res) => {
   return res.json({ ok: true, updatedAt: COMMS_STORE.updatedAt });
 });
 
+
+/* ----------------------------- Socios ---------------------------------- */
+
+app.get("/socios/meta", async (req, res) => {
+  try {
+    if (dbReady) {
+      const r = await pool.query("SELECT COUNT(*)::int AS count, MAX(updated_at) AS updated_at FROM uic_socios");
+      const count = r.rows?.[0]?.count || 0;
+      const updatedAt = r.rows?.[0]?.updated_at ? new Date(r.rows[0].updated_at).toISOString() : "";
+      return res.json({ count, updatedAt });
+    }
+  } catch (e) {
+    console.log("⚠️ DB socios/meta error, fallback JSON:", e?.message || e);
+  }
+  return res.json({ count: (SOCIOS_STORE.items || []).length, updatedAt: SOCIOS_STORE.updatedAt });
+});
+
+
+app.get("/socios", async (req, res) => {
+  const page = Math.max(parseInt(req.query.page || "1", 10) || 1, 1);
+  const perPage = Math.min(Math.max(parseInt(req.query.per_page || "25", 10) || 25, 5), 50);
+  const category = (req.query.category || "").toString().trim().toLowerCase();
+  const q = (req.query.q || "").toString().trim().toLowerCase();
+
+  const offset = (page - 1) * perPage;
+
+  // DB
+  if (dbReady) {
+    try {
+      const where = [];
+      const vals = [];
+      let idx = 1;
+      if (category && category !== "todos") {
+        where.push(`category = $${idx++}`);
+        vals.push(category);
+      }
+      if (q) {
+        where.push(`(LOWER(company_name) LIKE $${idx} OR CAST(member_no AS TEXT) LIKE $${idx})`);
+        vals.push(`%${q}%`);
+        idx++;
+      }
+      const whereSql = where.length ? `WHERE ${where.join(" AND ")}` : "";
+
+      // total limitado para paginación
+      const totalR = await pool.query(`SELECT COUNT(*)::int AS total FROM uic_socios ${whereSql}`, vals);
+      const total = totalR.rows?.[0]?.total || 0;
+
+      vals.push(perPage);
+      vals.push(offset);
+      const listR = await pool.query(
+        `SELECT id, member_no, company_name, category, expertise, website_url, social_url, created_at, updated_at
+         FROM uic_socios
+         ${whereSql}
+         ORDER BY member_no ASC
+         LIMIT $${idx++} OFFSET $${idx++}`,
+        vals
+      );
+
+      const items = (listR.rows || []).map((r) => ({
+        id: r.id,
+        member_no: r.member_no,
+        company_name: r.company_name,
+        category: r.category,
+        expertise: r.expertise || "",
+        website_url: r.website_url || "",
+        social_url: r.social_url || "",
+        created_at: r.created_at ? new Date(r.created_at).toISOString() : "",
+        updated_at: r.updated_at ? new Date(r.updated_at).toISOString() : "",
+      }));
+
+      const has_more = offset + items.length < total;
+      const next_page = has_more ? page + 1 : null;
+
+      return res.json({ page, per_page: perPage, total, has_more, next_page, items });
+    } catch (e) {
+      console.log("⚠️ DB socios/list error, fallback JSON:", e?.message || e);
+    }
+  }
+
+  // JSON fallback
+  let items = (SOCIOS_STORE.items || []).slice();
+  if (category && category !== "todos") items = items.filter((x) => (x.category || "").toLowerCase() === category);
+  if (q) {
+    items = items.filter((x) => {
+      const n = String(x.company_name || "").toLowerCase();
+      const mn = String(x.member_no || "");
+      return n.includes(q) || mn.includes(q);
+    });
+  }
+  items.sort((a, b) => (a.member_no || 0) - (b.member_no || 0));
+  const total = items.length;
+  const paged = items.slice(offset, offset + perPage);
+  const has_more = offset + paged.length < total;
+  const next_page = has_more ? page + 1 : null;
+  return res.json({ page, per_page: perPage, total, has_more, next_page, items: paged });
+});
+
+
+app.post("/socios", requireAdmin, async (req, res) => {
+  const memberNo = parseInt(req.body?.memberNo, 10);
+  const companyName = String(req.body?.companyName || "").trim();
+  const category = String(req.body?.category || "").trim().toLowerCase();
+  const expertise = String(req.body?.expertise || "").trim();
+  const websiteUrl = normalizeUrl(req.body?.websiteUrl);
+  const socialUrl = normalizeUrl(req.body?.socialUrl);
+
+  if (!Number.isFinite(memberNo) || memberNo <= 0) return res.status(400).json({ error: "memberNo inválido" });
+  if (!companyName) return res.status(400).json({ error: "companyName requerido" });
+
+  const validCategories = new Set(["logistica", "fabricacion", "servicios"]);
+  const cat = validCategories.has(category) ? category : guessSocioCategory(companyName).category;
+  const exp = expertise || guessSocioCategory(companyName).expertise || "";
+
+  const id = `soc_${memberNo}_${Math.random().toString(36).slice(2, 8)}`;
+
+  // DB
+  if (dbReady) {
+    try {
+      await pool.query(
+        `INSERT INTO uic_socios (id, member_no, company_name, category, expertise, website_url, social_url)
+         VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+        [id, memberNo, companyName, cat, exp, websiteUrl, socialUrl]
+      );
+      return res.json({ ok: true, id });
+    } catch (e) {
+      const msg = e?.message || String(e);
+      if (/unique/i.test(msg)) return res.status(409).json({ error: "memberNo ya existe" });
+      console.log("⚠️ DB socios/create error, fallback JSON:", msg);
+    }
+  }
+
+  // JSON fallback
+  if ((SOCIOS_STORE.items || []).some((x) => Number(x.member_no) === memberNo)) {
+    return res.status(409).json({ error: "memberNo ya existe" });
+  }
+  SOCIOS_STORE.items.unshift({
+    id,
+    member_no: memberNo,
+    company_name: companyName,
+    category: cat,
+    expertise: exp,
+    website_url: websiteUrl,
+    social_url: socialUrl,
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  });
+  SOCIOS_STORE.items = SOCIOS_STORE.items.slice(0, SOCIOS_KEEP);
+  touchSociosStore();
+  return res.json({ ok: true, id });
+});
+
+
+app.put("/socios/:id", requireAdmin, async (req, res) => {
+  const id = String(req.params.id || "").trim();
+  if (!id) return res.status(400).json({ error: "id requerido" });
+
+  const memberNo = req.body?.memberNo !== undefined ? parseInt(req.body.memberNo, 10) : null;
+  const companyName = req.body?.companyName !== undefined ? String(req.body.companyName || "").trim() : null;
+  const category = req.body?.category !== undefined ? String(req.body.category || "").trim().toLowerCase() : null;
+  const expertise = req.body?.expertise !== undefined ? String(req.body.expertise || "").trim() : null;
+  const websiteUrl = req.body?.websiteUrl !== undefined ? normalizeUrl(req.body.websiteUrl) : null;
+  const socialUrl = req.body?.socialUrl !== undefined ? normalizeUrl(req.body.socialUrl) : null;
+
+  const validCategories = new Set(["logistica", "fabricacion", "servicios"]);
+
+  // DB
+  if (dbReady) {
+    try {
+      const sets = [];
+      const vals = [];
+      let idx = 1;
+      if (memberNo !== null) {
+        if (!Number.isFinite(memberNo) || memberNo <= 0) return res.status(400).json({ error: "memberNo inválido" });
+        sets.push(`member_no = $${idx++}`);
+        vals.push(memberNo);
+      }
+      if (companyName !== null) {
+        if (!companyName) return res.status(400).json({ error: "companyName requerido" });
+        sets.push(`company_name = $${idx++}`);
+        vals.push(companyName);
+      }
+      if (category !== null) {
+        const c = validCategories.has(category) ? category : null;
+        if (!c) return res.status(400).json({ error: "category inválida" });
+        sets.push(`category = $${idx++}`);
+        vals.push(c);
+      }
+      if (expertise !== null) {
+        sets.push(`expertise = $${idx++}`);
+        vals.push(expertise);
+      }
+      if (websiteUrl !== null) {
+        sets.push(`website_url = $${idx++}`);
+        vals.push(websiteUrl);
+      }
+      if (socialUrl !== null) {
+        sets.push(`social_url = $${idx++}`);
+        vals.push(socialUrl);
+      }
+      sets.push(`updated_at = NOW()`);
+      if (!sets.length) return res.json({ ok: true });
+
+      vals.push(id);
+      const r = await pool.query(`UPDATE uic_socios SET ${sets.join(", ")} WHERE id = $${idx} `, vals);
+      if (!r.rowCount) return res.status(404).json({ error: "Socio no encontrado" });
+      return res.json({ ok: true });
+    } catch (e) {
+      const msg = e?.message || String(e);
+      if (/unique/i.test(msg)) return res.status(409).json({ error: "memberNo ya existe" });
+      console.log("⚠️ DB socios/update error, fallback JSON:", msg);
+    }
+  }
+
+  // JSON fallback
+  const idx = (SOCIOS_STORE.items || []).findIndex((x) => x.id === id);
+  if (idx < 0) return res.status(404).json({ error: "Socio no encontrado" });
+
+  if (memberNo !== null) {
+    if (!Number.isFinite(memberNo) || memberNo <= 0) return res.status(400).json({ error: "memberNo inválido" });
+    if ((SOCIOS_STORE.items || []).some((x) => x.id !== id && Number(x.member_no) === memberNo)) {
+      return res.status(409).json({ error: "memberNo ya existe" });
+    }
+    SOCIOS_STORE.items[idx].member_no = memberNo;
+  }
+  if (companyName !== null) {
+    if (!companyName) return res.status(400).json({ error: "companyName requerido" });
+    SOCIOS_STORE.items[idx].company_name = companyName;
+  }
+  if (category !== null) {
+    if (!validCategories.has(category)) return res.status(400).json({ error: "category inválida" });
+    SOCIOS_STORE.items[idx].category = category;
+  }
+  if (expertise !== null) SOCIOS_STORE.items[idx].expertise = expertise;
+  if (websiteUrl !== null) SOCIOS_STORE.items[idx].website_url = websiteUrl;
+  if (socialUrl !== null) SOCIOS_STORE.items[idx].social_url = socialUrl;
+  SOCIOS_STORE.items[idx].updated_at = new Date().toISOString();
+  touchSociosStore();
+  return res.json({ ok: true });
+});
+
+
+app.delete("/socios/:id", requireAdmin, async (req, res) => {
+  const id = String(req.params.id || "").trim();
+  if (!id) return res.status(400).json({ error: "id requerido" });
+
+  if (dbReady) {
+    try {
+      const r = await pool.query("DELETE FROM uic_socios WHERE id = $1", [id]);
+      if (!r.rowCount) return res.status(404).json({ error: "Socio no encontrado" });
+      return res.json({ ok: true });
+    } catch (e) {
+      console.log("⚠️ DB socios/delete error, fallback JSON:", e?.message || e);
+    }
+  }
+
+  const before = (SOCIOS_STORE.items || []).length;
+  SOCIOS_STORE.items = (SOCIOS_STORE.items || []).filter((x) => x.id !== id);
+  if ((SOCIOS_STORE.items || []).length === before) return res.status(404).json({ error: "Socio no encontrado" });
+  touchSociosStore();
+  return res.json({ ok: true });
+});
+
 /* ----------------------------- Push endpoints --------------------------- */
 
 // clave pública para que el frontend arme subscription
@@ -843,6 +1338,8 @@ app.post("/subscribe", (req, res) => {
 
 async function start() {
   await initDb();
+  await seedSociosIfEmpty();
+  await pruneDb();
 
   app.listen(PORT, () => {
     console.log(`UIC API running on :${PORT}`);
