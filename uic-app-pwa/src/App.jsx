@@ -112,7 +112,7 @@ export default function App() {
   }
 
   async function loadPosts(opts = {}) {
-    const { perPage = 6, page = 1, limitTotal = 100, category = categoryParam, q = search } = opts;
+    const { perPage = 6, page = 1, limitTotal = 100, category = categoryParam, q = search, append = false } = opts;
 
     if (!canUseApi) {
       setErrorPosts("Falta configurar VITE_API_BASE en el frontend.");
@@ -131,7 +131,13 @@ export default function App() {
 
       const data = await apiGet(`/wp/posts?${qs.toString()}`);
       const items = (data.items || []).map(normalizePost);
-      setPosts(items);
+      setPosts((prev) => {
+        if (!append) return items;
+        const seen = new Set((prev || []).map((x) => x.id));
+        const merged = [...(prev || [])];
+        for (const it of items) { if (!seen.has(it.id)) merged.push(it); }
+        return merged;
+      });
       setPostsPager({
         page: data.page || page,
         per_page: data.per_page || perPage,
@@ -160,10 +166,10 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [canUseApi]);
 
-  // Re-carga cuando cambia filtro o búsqueda en Publicaciones
+  // Re-carga cuando cambia filtro en Publicaciones o Inicio
   useEffect(() => {
-    if (tab !== "publicaciones") return;
-    loadPosts({ perPage: 6, page: 1 });
+    if (tab !== "publicaciones" && tab !== "inicio") return;
+    loadPosts({ perPage: 6, page: 1, append: false });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab, categorySlug]);
 
@@ -180,14 +186,7 @@ export default function App() {
     if (commsMeta?.updatedAt) markCommsSeen(commsMeta.updatedAt);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab]);
-    if (!r.ok) {
-      const j = await r.json().catch(() => ({}));
-      throw new Error(j?.error || `Error ${r.status}`);
-    }
-    const j = await r.json();
-    setEventsMeta((m) => ({ ...m, updatedAt: j.updatedAt || m.updatedAt }));
-    await loadAgendaForTwoMonths(new Date(date + "T00:00:00"));
-  };
+
 
   const quickLinks = [
     { label: "Hacete socio", href: "https://uic-campana.com.ar/hacete-socio/" },
@@ -201,6 +200,93 @@ export default function App() {
   const homeCards = posts.slice(0, 6);
 
   // ---------------- Agenda helpers ----------------
+
+function pad2(n) { return String(n).padStart(2, "0"); }
+
+function localIsoDate(d) {
+  if (!(d instanceof Date)) d = new Date(d);
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+}
+
+function formatDateTime(isoStr) {
+  if (!isoStr) return "";
+  const d = new Date(isoStr);
+  if (Number.isNaN(d.getTime())) return String(isoStr);
+  return `${pad2(d.getDate())}/${pad2(d.getMonth() + 1)}/${d.getFullYear()} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+}
+
+function startOfMonth(d) {
+  const x = new Date(d);
+  return new Date(x.getFullYear(), x.getMonth(), 1);
+}
+
+function addMonths(d, n) {
+  const x = startOfMonth(d);
+  return new Date(x.getFullYear(), x.getMonth() + n, 1);
+}
+
+function endOfMonth(d) {
+  const x = startOfMonth(d);
+  return new Date(x.getFullYear(), x.getMonth() + 1, 0);
+}
+
+function agendaMinBase() {
+  return startOfMonth(new Date()); // mes actual
+}
+
+function agendaMaxBase() {
+  // como se muestran 2 meses, el "base" máximo es mes actual + 10 (base+1 = +11 => 12 meses)
+  return addMonths(new Date(), 10);
+}
+
+async function loadAgendaForTwoMonths(baseDate) {
+  if (!canUseApi) return;
+  const base = startOfMonth(baseDate);
+  const min = agendaMinBase();
+  const max = agendaMaxBase();
+  const clamped = base < min ? min : base > max ? max : base;
+
+  setAgendaBase(clamped);
+
+  const from = localIsoDate(clamped);
+  const to = localIsoDate(endOfMonth(addMonths(clamped, 1)));
+
+  try {
+    const meta = await apiGet("/events/meta");
+    setEventsMeta(meta || { updatedAt: null, count: 0 });
+  } catch {
+    // no crítico
+  }
+
+  const data = await apiGet(`/events?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`);
+  const items = data.items || [];
+  setEvents(items);
+  setEventsMeta((m) => ({ ...m, updatedAt: data.updatedAt || m.updatedAt }));
+
+  const today = localIsoDate(new Date());
+  setTodayEventsCount(items.filter((ev) => ev.date === today).length);
+}
+
+async function createEvent(payload) {
+  if (!isAdmin) return;
+  if (!canUseApi) return;
+
+  const r = await fetch(`${API_BASE}/events`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-admin-token": adminToken,
+    },
+    body: JSON.stringify(payload),
+  });
+
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(data?.error || `Error ${r.status}`);
+
+  setEventsMeta((m) => ({ ...m, updatedAt: data.updatedAt || m.updatedAt }));
+  await loadAgendaForTwoMonths(agendaBase);
+}
+
   const iso = (d) => localIsoDate(d);
 
   function getEventsForDate(dateStr) {
@@ -438,12 +524,16 @@ export default function App() {
                   <div className="cardSub">Lectura desde el feed público de WordPress</div>
                 </div>
                 <div className="row" style={{ gap: 8 }}>
-                  <button className="btnSecondary" disabled={postsPager.page <= 1} onClick={() => loadPosts({ perPage: 6, page: Math.max(1, postsPager.page - 1) })}>
-                    ◀
-                  </button>
-                  <button className="btnSecondary" disabled={!postsPager.has_more} onClick={() => loadPosts({ perPage: 6, page: postsPager.page + 1 })}>
-                    ▶
-                  </button>
+                  {postsPager.has_more && (
+                    <button
+                      className="btnSecondary"
+                      disabled={loadingPosts}
+                      onClick={() => loadPosts({ perPage: postsPager.per_page || 6, page: (postsPager.page || 1) + 1, append: true, category: categoryParam, q: "" })}
+                      title="Cargar más"
+                    >
+                      Más
+                    </button>
+                  )}
                 </div>
               </div>
 
@@ -473,13 +563,23 @@ export default function App() {
               </div>
 
               <div className="muted" style={{ marginTop: 6 }}>
-                Página {postsPager.page} / {Math.ceil((postsPager.limit_total || 100) / (postsPager.per_page || 6))}
+                Mostrando {posts.length} publicaciones
               </div>
 
               {loadingPosts ? (
                 <div className="muted">Cargando…</div>
               ) : (
-                <div className="cardsScroller">
+                <div className="cardsScroller"
+                  onScroll={(e) => {
+                    const el = e.currentTarget;
+                    if (!el) return;
+                    const nearEnd = el.scrollLeft + el.clientWidth >= el.scrollWidth - 40;
+                    if (!nearEnd) return;
+                    if (loadingPosts) return;
+                    if (!postsPager.has_more) return;
+                    loadPosts({ perPage: postsPager.per_page || 6, page: (postsPager.page || 1) + 1, append: true, category: categoryParam, q: "" });
+                  }}
+                >
                   {posts.map((p) => (
                     <a key={p.id} className="postCard" href={p.link} target="_blank" rel="noreferrer">
                       {p.image ? <img className="postImg" src={p.image} alt="" /> : <div className="postImgPlaceholder" />}
@@ -580,14 +680,6 @@ export default function App() {
           <section className="card">
             <div className="rowBetween">
               <div className="cardTitle">Agenda</div>
-              <button
-                className="btnPrimary"
-                onClick={() => loadAgendaForTwoMonths(new Date())}
-                disabled={!canUseApi}
-                title={!canUseApi ? "API no disponible" : ""}
-              >
-                Actualizar
-              </button>
             </div>
 
             {!canUseApi ? (
@@ -596,7 +688,7 @@ export default function App() {
               <>
                 <div className="muted" style={{ marginBottom: 8 }}>
                   Se muestran <b>dos meses</b>. Podés avanzar/retroceder de a 2 meses.
-                  Rango: hasta <b>6 años hacia atrás</b> y <b>1 año hacia adelante</b>.
+                  Ventana móvil: desde el <b>mes actual</b> hasta <b>12 meses hacia adelante</b> (lo anterior se borra automáticamente).
                 </div>
 
                 <div className="pagerRow" style={{ marginTop: 0 }}>
@@ -797,7 +889,7 @@ export default function App() {
                   {comms.map((c) => (
                     <div key={c.id || c.createdAt || c.title} className="eventItem">
                       <div className="eventTitle">{c.title}</div>
-                      <div className="muted" style={{ fontSize: 12, marginTop: 2 }}>{(c.createdAt || "").slice(0, 10)}</div>
+                      <div className="muted" style={{ fontSize: 12, marginTop: 2 }}>{formatDateTime(c.createdAt)}</div>
                       <div className="eventDesc" style={{ whiteSpace: "pre-wrap" }}>{c.message}</div>
                     </div>
                   ))}

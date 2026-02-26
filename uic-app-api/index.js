@@ -227,11 +227,24 @@ async function initDb() {
   }
 }
 
+
 async function pruneDb() {
-  if (!dbReady) return;
+  const w = agendaWindowBounds();
+
+  // Fallback JSON: prune siempre
   try {
-    // Agenda: mantener últimos EVENTS_KEEP_DAYS
-    await pool.query(`DELETE FROM uic_events WHERE date < (CURRENT_DATE - ($1 || ' days')::interval)`, [String(EVENTS_KEEP_DAYS)]);
+    EVENTS_STORE.events = (EVENTS_STORE.events || []).filter((ev) => ev.date >= w.start && ev.date <= w.end);
+    // orden ascendente por fecha
+    EVENTS_STORE.events.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+    // COMMS fallback: mantener últimas COMMS_KEEP
+    COMMS_STORE.items = (COMMS_STORE.items || []).slice(0, COMMS_KEEP);
+  } catch (_) {}
+
+  if (!dbReady) return;
+
+  try {
+    // Agenda: mantener ventana móvil (mes actual -> +12 meses)
+    await pool.query("DELETE FROM uic_events WHERE date < $1 OR date > $2", [w.start, w.end]);
 
     // Comms: mantener últimas COMMS_KEEP
     await pool.query(
@@ -276,6 +289,34 @@ function inRange(d, from, to) {
   if (to && d > to) return false;
   return true;
 }
+
+
+function agendaWindowBounds() {
+  // Ventana móvil: mes actual -> +12 meses hacia adelante (incluye 12 meses: mes actual + 11)
+  const now = new Date();
+  const start = new Date(now.getFullYear(), now.getMonth(), 1);
+  const end = new Date(now.getFullYear(), now.getMonth() + 12, 0); // último día del mes (mes+11)
+  const toIso = (d) => {
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, "0");
+    const dd = String(d.getDate()).padStart(2, "0");
+    return `${y}-${m}-${dd}`;
+  };
+  return { start: toIso(start), end: toIso(end) };
+}
+
+function clampRangeToWindow(from, to) {
+  const w = agendaWindowBounds();
+  const f = from && from > w.start ? from : w.start;
+  const t = to && to < w.end ? to : w.end;
+  return { from: f, to: t, window: w };
+}
+
+function isWithinWindow(dateStr) {
+  const w = agendaWindowBounds();
+  return !!dateStr && dateStr >= w.start && dateStr <= w.end;
+}
+
 
 /* ----------------------------- App ------------------------------------- */
 
@@ -443,12 +484,83 @@ app.get("/", (req, res) => {
 
 app.get("/health", (req, res) => res.json({ ok: true }));
 
+/* ------------------------- WordPress (posts) ---------------------------- */
+
+app.get("/wp/categories", async (req, res) => {
+  // Para la UI actual no es crítico; devolvemos un set mínimo consistente.
+  return res.json({
+    items: [
+      { slug: "beneficios", name: "Beneficios" },
+      { slug: "eventos", name: "Eventos" },
+      { slug: "promocion-industrial", name: "Promoción industrial" },
+      { slug: "institucional", name: "Institucional" },
+    ],
+  });
+});
+
+app.get("/wp/posts", async (req, res) => {
+  const page = Math.max(parseInt(req.query.page || "1", 10) || 1, 1);
+  const perPage = Math.min(Math.max(parseInt(req.query.per_page || "6", 10) || 6, 1), 20);
+  const limitTotal = Math.min(Math.max(parseInt(req.query.limit_total || "100", 10) || 100, 1), 300);
+  const q = (req.query.q || "").toString().trim().toLowerCase();
+  const category = (req.query.category || "").toString().trim().toLowerCase();
+
+  try {
+    let feedUrl = WP_FEED_URL;
+    if (category) {
+      feedUrl = `${WP_SITE_BASE}/category/${encodeURIComponent(category)}/feed/`;
+    }
+    // WordPress soporta paginación para feeds vía ?paged=
+    const url = new URL(feedUrl);
+    if (page > 1) url.searchParams.set("paged", String(page));
+
+    let items = await fetchRssItems(url.toString());
+
+    if (category) {
+      items = items.filter((p) => (p.category_slugs || []).includes(category));
+    }
+    if (q) {
+      items = items.filter((p) => {
+        const t = (p.title || "").toLowerCase();
+        const e = (p.excerpt || "").toLowerCase();
+        return t.includes(q) || e.includes(q);
+      });
+    }
+
+    // En RSS el total real es difícil; usamos limitTotal como techo UI
+    const start = 0;
+    const sliced = items.slice(start, start + perPage);
+
+    const has_more = items.length >= perPage; // heurística
+    const next_page = has_more ? page + 1 : null;
+
+    return res.json({
+      page,
+      per_page: perPage,
+      limit_total: limitTotal,
+      has_more,
+      next_page,
+      items: sliced,
+    });
+  } catch (e) {
+    console.log("⚠️ wp/posts error:", e?.message || e);
+    return res.status(502).json({ error: "No se pudo obtener el feed" });
+  }
+});
+
+
+
 /* ----------------------------- Eventos --------------------------------- */
 
 app.get("/events/meta", async (req, res) => {
+  const w = agendaWindowBounds();
   try {
+    await pruneDb();
     if (dbReady) {
-      const r = await pool.query("SELECT COUNT(*)::int AS count, MAX(updated_at) AS updated_at FROM uic_events");
+      const r = await pool.query(
+        "SELECT COUNT(*)::int AS count, MAX(updated_at) AS updated_at FROM uic_events WHERE date >= $1 AND date <= $2",
+        [w.start, w.end]
+      );
       const count = r.rows?.[0]?.count || 0;
       const updatedAt = r.rows?.[0]?.updated_at ? new Date(r.rows[0].updated_at).toISOString() : "";
       return res.json({ updatedAt, count });
@@ -456,24 +568,26 @@ app.get("/events/meta", async (req, res) => {
   } catch (e) {
     console.log("⚠️ DB events/meta error, fallback JSON:", e?.message || e);
   }
-  return res.json({ updatedAt: EVENTS_STORE.updatedAt, count: EVENTS_STORE.events.length });
+  // fallback JSON (ya pruned)
+  return res.json({ updatedAt: EVENTS_STORE.updatedAt, count: (EVENTS_STORE.events || []).length });
 });
 
 app.get("/events", async (req, res) => {
-  const from = isoDateOnly((req.query.from || "").toString().trim());
-  const to = isoDateOnly((req.query.to || "").toString().trim());
+  const qFrom = isoDateOnly((req.query.from || "").toString().trim());
+  const qTo = isoDateOnly((req.query.to || "").toString().trim());
+  const { from, to, window } = clampRangeToWindow(qFrom, qTo);
+
+  if (from && to && from > to) {
+    return res.json({ updatedAt: EVENTS_STORE.updatedAt, items: [] });
+  }
 
   try {
+    await pruneDb();
     if (dbReady) {
-      let q = "SELECT id, to_char(date,'YYYY-MM-DD') AS date, title, COALESCE(description,'') AS description, highlight, created_at, updated_at FROM uic_events";
-      const params = [];
-      if (from || to) {
-        q += " WHERE 1=1";
-        if (from) { params.push(from); q += ` AND date >= $${params.length}`; }
-        if (to) { params.push(to); q += ` AND date <= $${params.length}`; }
-      }
-      q += " ORDER BY date ASC";
-      const r = await pool.query(q, params);
+      const r = await pool.query(
+        "SELECT id, to_char(date,'YYYY-MM-DD') AS date, title, COALESCE(description,'') AS description, highlight, created_at, updated_at FROM uic_events WHERE date >= $1 AND date <= $2 ORDER BY date ASC",
+        [from, to]
+      );
 
       const items = (r.rows || []).map((x) => ({
         id: x.id,
@@ -485,7 +599,7 @@ app.get("/events", async (req, res) => {
         updatedAt: x.updated_at ? new Date(x.updated_at).toISOString() : "",
       }));
 
-      const meta = await pool.query("SELECT MAX(updated_at) AS updated_at FROM uic_events");
+      const meta = await pool.query("SELECT MAX(updated_at) AS updated_at FROM uic_events WHERE date >= $1 AND date <= $2", [window.start, window.end]);
       const updatedAt = meta.rows?.[0]?.updated_at ? new Date(meta.rows[0].updated_at).toISOString() : "";
 
       return res.json({ updatedAt, items });
@@ -494,6 +608,7 @@ app.get("/events", async (req, res) => {
     console.log("⚠️ DB events/list error, fallback JSON:", e?.message || e);
   }
 
+  // fallback JSON (ya pruned)
   const items = (EVENTS_STORE.events || [])
     .filter((ev) => inRange(ev.date, from, to))
     .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
@@ -508,6 +623,7 @@ app.post("/events", requireAdmin, async (req, res) => {
   const highlight = Boolean(req.body?.highlight);
 
   if (!date) return res.status(400).json({ error: "date inválida (formato: YYYY-MM-DD)" });
+  if (!isWithinWindow(date)) return res.status(400).json({ error: "date fuera de la ventana móvil (mes actual -> +12 meses)" });
   if (!title) return res.status(400).json({ error: "title requerido" });
 
   const now = new Date().toISOString();
@@ -553,6 +669,8 @@ app.put("/events/:id", requireAdmin, async (req, res) => {
       const newHighlight = highlight !== null ? highlight : Boolean(base.highlight);
 
       if (!newDate) return res.status(400).json({ error: "date inválida (formato: YYYY-MM-DD)" });
+  if (!isWithinWindow(newDate)) return res.status(400).json({ error: "date fuera de la ventana móvil (mes actual -> +12 meses)" });
+      if (!isWithinWindow(newDate)) return res.status(400).json({ error: "date fuera de la ventana móvil (mes actual -> +12 meses)" });
       if (!newTitle) return res.status(400).json({ error: "title requerido" });
 
       const now = new Date().toISOString();
@@ -576,6 +694,7 @@ app.put("/events/:id", requireAdmin, async (req, res) => {
   const newHighlight = highlight !== null ? highlight : EVENTS_STORE.events[idx].highlight;
 
   if (!newDate) return res.status(400).json({ error: "date inválida (formato: YYYY-MM-DD)" });
+  if (!isWithinWindow(newDate)) return res.status(400).json({ error: "date fuera de la ventana móvil (mes actual -> +12 meses)" });
   if (!newTitle) return res.status(400).json({ error: "title requerido" });
 
   EVENTS_STORE.events[idx] = { ...EVENTS_STORE.events[idx], date: newDate, title: newTitle, description: newDesc, highlight: newHighlight, updatedAt: new Date().toISOString() };
