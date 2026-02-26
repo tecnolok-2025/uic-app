@@ -276,7 +276,7 @@ useEffect(() => {
     { label: "Agenda", href: "#", onClick: () => setTab("agenda") },
     { label: "Comunicación al socio", href: "#", onClick: () => { setTab("comunicacion"); } },
     { label: "Socios", href: "#", onClick: () => { setTab("socios"); } },
-    { label: "Próximamente", href: "#", disabled: true },
+    { label: "Requerimientos Institucionales", href: "https://cpf-web.onrender.com/" },
     { label: "Sitio UIC", href: "https://uic-campana.com.ar" },
   ];
 
