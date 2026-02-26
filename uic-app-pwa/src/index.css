@@ -50,7 +50,19 @@ a{color:inherit}
 
 .content{
   flex:1;
-  padding:0 16px 90px;
+  padding:0 16px 120px;
+}
+
+/* Footer versión (arriba del bottom nav) */
+.appFooter{
+  position:fixed;
+  left:0;right:0;
+  bottom:56px;
+  text-align:center;
+  color:rgba(255,255,255,0.55);
+  font-size:12px;
+  padding:6px 8px;
+  pointer-events:none;
 }
 
 .card{
@@ -494,6 +506,9 @@ a{color:inherit}
   border-radius:14px;
   padding:14px;
 }
+.modalWide{
+  width:min(1100px, 100%);
+}
 .modalTitle{
   font-weight:1000;
   font-size:16px;
@@ -522,3 +537,26 @@ a{color:inherit}
 }
 
 .socioLinkDisabled{ color:var(--text); font-weight:1000; opacity:0.85; }
+
+.gridTable{
+  width:100%;
+  border-collapse:separate;
+  border-spacing:0;
+  font-size:12px;
+}
+.gridTable th,
+.gridTable td{
+  border-bottom:1px solid rgba(255,255,255,0.10);
+  padding:8px;
+  vertical-align:top;
+}
+.gridTable th{
+  text-align:left;
+  font-size:11px;
+  color:var(--muted);
+  font-weight:1000;
+  position:sticky;
+  top:0;
+  background:rgba(10,18,28,0.98);
+  z-index:1;
+}

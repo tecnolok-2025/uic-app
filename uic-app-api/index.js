@@ -223,6 +223,13 @@ function normalizeUrl(u) {
   return `https://${s}`;
 }
 
+function pickBody(body, ...keys) {
+  for (const k of keys) {
+    if (body && Object.prototype.hasOwnProperty.call(body, k) && body[k] !== undefined) return body[k];
+  }
+  return undefined;
+}
+
 function guessSocioCategory(companyName) {
   const n = String(companyName || "").toLowerCase();
   const has = (re) => re.test(n);
@@ -258,6 +265,19 @@ function guessSocioCategory(companyName) {
 }
 
 // Seed inicial de socios (solo número + empresa; sin CUIT/email por confidencialidad)
+// Notas:
+// - La categoría por defecto se infiere por heurística (nombre).
+// - Para casos particulares (p.ej. "Tecno Logisti-K"), se definen overrides manuales.
+const SOCIO_OVERRIDES = {
+  // Ejemplo validado: Tecno Logisti-K = Ingeniería / Consultoría profesional (Servicios)
+  101: {
+    category: "servicios",
+    expertise: "Ingeniería y consultoría profesional",
+    website_url: "https://www.tecnolok.com.ar",
+    social_url: "",
+  },
+};
+
 const SOCIOS_SEED = [
   { member_no: 1, company_name: "INSADI S.A." },
   { member_no: 3, company_name: "MOTORES ELECTRICOS Y COMANDOS SA" },
@@ -354,6 +374,17 @@ const SOCIOS_SEED = [
   { member_no: 249, company_name: "HOTEL RUTA 6" },
 ];
 
+function getSocioDefaultsFromSeed(seed) {
+  const o = SOCIO_OVERRIDES[Number(seed?.member_no)] || null;
+  const g = guessSocioCategory(seed.company_name);
+  return {
+    category: (o?.category || g.category || "servicios"),
+    expertise: (o?.expertise || g.expertise || ""),
+    website_url: (o?.website_url || ""),
+    social_url: (o?.social_url || ""),
+  };
+}
+
 async function initDb() {
   if (!DATABASE_URL) return;
   try {
@@ -422,13 +453,13 @@ async function seedSociosIfEmpty() {
       if (count > 0) return;
 
       for (const s of SOCIOS_SEED) {
-        const g = guessSocioCategory(s.company_name);
+        const g = getSocioDefaultsFromSeed(s);
         const id = `soc_${s.member_no}`;
         await pool.query(
           `INSERT INTO uic_socios (id, member_no, company_name, category, expertise, website_url, social_url)
            VALUES ($1,$2,$3,$4,$5,$6,$7)
            ON CONFLICT (member_no) DO NOTHING`,
-          [id, s.member_no, s.company_name, g.category, g.expertise || "", "", ""]
+          [id, s.member_no, s.company_name, g.category, g.expertise || "", g.website_url || "", g.social_url || ""]
         );
       }
       console.log(`✅ Socios seed inicial cargado (${SOCIOS_SEED.length}).`);
@@ -442,21 +473,68 @@ async function seedSociosIfEmpty() {
   try {
     if ((SOCIOS_STORE.items || []).length > 0) return;
     SOCIOS_STORE.items = SOCIOS_SEED.map((s) => {
-      const g = guessSocioCategory(s.company_name);
+      const g = getSocioDefaultsFromSeed(s);
       return {
         id: `soc_${s.member_no}`,
         member_no: s.member_no,
         company_name: s.company_name,
         category: g.category,
         expertise: g.expertise || "",
-        website_url: "",
-        social_url: "",
+        website_url: g.website_url || "",
+        social_url: g.social_url || "",
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
       };
     });
     touchSociosStore();
     console.log(`✅ Socios seed inicial cargado en JSON (${SOCIOS_SEED.length}).`);
+  } catch (_) {}
+}
+
+// Aplica correcciones manuales (overrides) aunque la tabla ya tenga datos.
+// Se usa para ajustar casos especiales sin depender de que la DB esté vacía.
+async function applySocioOverrides() {
+  const keys = Object.keys(SOCIO_OVERRIDES || {});
+  if (!keys.length) return;
+
+  // DB
+  if (dbReady) {
+    try {
+      for (const k of keys) {
+        const memberNo = Number(k);
+        const o = SOCIO_OVERRIDES[memberNo];
+        if (!o) continue;
+        await pool.query(
+          `UPDATE uic_socios
+             SET category = COALESCE($2, category),
+                 expertise = COALESCE($3, expertise),
+                 website_url = COALESCE($4, website_url),
+                 social_url = COALESCE($5, social_url),
+                 updated_at = NOW()
+           WHERE member_no = $1`,
+          [memberNo, o.category || null, o.expertise || null, o.website_url || null, o.social_url || null]
+        );
+      }
+      return;
+    } catch (e) {
+      console.log("⚠️ applySocioOverrides DB error:", e?.message || e);
+    }
+  }
+
+  // JSON fallback
+  try {
+    for (const k of keys) {
+      const memberNo = Number(k);
+      const o = SOCIO_OVERRIDES[memberNo];
+      const it = (SOCIOS_STORE.items || []).find((x) => Number(x.member_no) === memberNo);
+      if (!it || !o) continue;
+      if (o.category) it.category = o.category;
+      if (o.expertise) it.expertise = o.expertise;
+      if (o.website_url) it.website_url = o.website_url;
+      if (o.social_url) it.social_url = o.social_url;
+      it.updated_at = new Date().toISOString();
+    }
+    touchSociosStore();
   } catch (_) {}
 }
 
@@ -1073,7 +1151,8 @@ app.get("/socios/meta", async (req, res) => {
 
 app.get("/socios", async (req, res) => {
   const page = Math.max(parseInt(req.query.page || "1", 10) || 1, 1);
-  const perPage = Math.min(Math.max(parseInt(req.query.per_page || "25", 10) || 25, 5), 50);
+  // Soportar edición masiva (grilla) desde el frontend admin.
+  const perPage = Math.min(Math.max(parseInt(req.query.per_page || "25", 10) || 25, 5), 200);
   const category = (req.query.category || "").toString().trim().toLowerCase();
   const q = (req.query.q || "").toString().trim().toLowerCase();
 
@@ -1152,12 +1231,12 @@ app.get("/socios", async (req, res) => {
 
 
 app.post("/socios", requireAdmin, async (req, res) => {
-  const memberNo = parseInt(req.body?.memberNo, 10);
-  const companyName = String(req.body?.companyName || "").trim();
-  const category = String(req.body?.category || "").trim().toLowerCase();
-  const expertise = String(req.body?.expertise || "").trim();
-  const websiteUrl = normalizeUrl(req.body?.websiteUrl);
-  const socialUrl = normalizeUrl(req.body?.socialUrl);
+  const memberNo = parseInt(pickBody(req.body, 'memberNo', 'member_no'), 10);
+  const companyName = String(pickBody(req.body, 'companyName', 'company_name') || "").trim();
+  const category = String(pickBody(req.body, 'category') || "").trim().toLowerCase();
+  const expertise = String(pickBody(req.body, 'expertise') || "").trim();
+  const websiteUrl = normalizeUrl(pickBody(req.body, 'websiteUrl', 'website_url'));
+  const socialUrl = normalizeUrl(pickBody(req.body, 'socialUrl', 'social_url'));
 
   if (!Number.isFinite(memberNo) || memberNo <= 0) return res.status(400).json({ error: "memberNo inválido" });
   if (!companyName) return res.status(400).json({ error: "companyName requerido" });
@@ -1205,16 +1284,117 @@ app.post("/socios", requireAdmin, async (req, res) => {
 });
 
 
+app.post("/socios/bulk", requireAdmin, async (req, res) => {
+  const rawItems = req.body?.items;
+  if (!Array.isArray(rawItems) || rawItems.length === 0) {
+    return res.status(400).json({ error: "items requerido (array)" });
+  }
+
+  const validCategories = new Set(["logistica", "fabricacion", "servicios"]);
+  const items = rawItems
+    .map((it) => {
+      const memberNo = parseInt(pickBody(it, "memberNo", "member_no"), 10);
+      const companyName = String(pickBody(it, "companyName", "company_name") || "").trim();
+      const category = String(pickBody(it, "category") || "").trim().toLowerCase();
+      const expertise = String(pickBody(it, "expertise") || "").trim();
+      const websiteUrl = normalizeUrl(pickBody(it, "websiteUrl", "website_url"));
+      const socialUrl = normalizeUrl(pickBody(it, "socialUrl", "social_url"));
+      const id = String(pickBody(it, "id") || "").trim() || null;
+
+      if (!Number.isFinite(memberNo) || memberNo <= 0) return null;
+      if (!companyName) return null;
+
+      const cat = validCategories.has(category) ? category : guessSocioCategory(companyName).category;
+      const exp = expertise || guessSocioCategory(companyName).expertise || "";
+
+      return { id, memberNo, companyName, cat, exp, websiteUrl, socialUrl };
+    })
+    .filter(Boolean);
+
+  if (!items.length) return res.status(400).json({ error: "items inválidos" });
+
+  if (dbReady) {
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      for (const it of items) {
+        const found = await client.query("SELECT id FROM uic_socios WHERE member_no = $1 LIMIT 1", [it.memberNo]);
+        const existingId = found.rows?.[0]?.id || null;
+        if (existingId) {
+          await client.query(
+            `UPDATE uic_socios
+               SET company_name = $2,
+                   category = $3,
+                   expertise = $4,
+                   website_url = $5,
+                   social_url = $6,
+                   updated_at = NOW()
+             WHERE id = $1`,
+            [existingId, it.companyName, it.cat, it.exp, it.websiteUrl, it.socialUrl]
+          );
+        } else {
+          const newId = it.id || `soc_${it.memberNo}_${Math.random().toString(36).slice(2, 8)}`;
+          await client.query(
+            `INSERT INTO uic_socios (id, member_no, company_name, category, expertise, website_url, social_url)
+             VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+            [newId, it.memberNo, it.companyName, it.cat, it.exp, it.websiteUrl, it.socialUrl]
+          );
+        }
+      }
+      await client.query("COMMIT");
+      return res.json({ ok: true, count: items.length });
+    } catch (e) {
+      await client.query("ROLLBACK");
+      console.log("⚠️ DB socios/bulk error, fallback JSON:", e?.message || e);
+    } finally {
+      client.release();
+    }
+  }
+
+  const byNo = new Map((SOCIOS_STORE.items || []).map((x) => [Number(x.member_no), x]));
+  for (const it of items) {
+    const existing = byNo.get(it.memberNo);
+    if (existing) {
+      existing.company_name = it.companyName;
+      existing.category = it.cat;
+      existing.expertise = it.exp;
+      existing.website_url = it.websiteUrl;
+      existing.social_url = it.socialUrl;
+      existing.updated_at = new Date().toISOString();
+    } else {
+      const newId = it.id || `soc_${it.memberNo}_${Math.random().toString(36).slice(2, 8)}`;
+      const obj = {
+        id: newId,
+        member_no: it.memberNo,
+        company_name: it.companyName,
+        category: it.cat,
+        expertise: it.exp,
+        website_url: it.websiteUrl,
+        social_url: it.socialUrl,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      };
+      SOCIOS_STORE.items.unshift(obj);
+      byNo.set(it.memberNo, obj);
+    }
+  }
+  SOCIOS_STORE.items.sort((a, b) => (a.member_no || 0) - (b.member_no || 0));
+  SOCIOS_STORE.items = SOCIOS_STORE.items.slice(0, SOCIOS_KEEP);
+  touchSociosStore();
+  return res.json({ ok: true, count: items.length });
+});
+
+
 app.put("/socios/:id", requireAdmin, async (req, res) => {
   const id = String(req.params.id || "").trim();
   if (!id) return res.status(400).json({ error: "id requerido" });
 
-  const memberNo = req.body?.memberNo !== undefined ? parseInt(req.body.memberNo, 10) : null;
-  const companyName = req.body?.companyName !== undefined ? String(req.body.companyName || "").trim() : null;
+  const memberNo = pickBody(req.body, 'memberNo', 'member_no') !== undefined ? parseInt(pickBody(req.body, 'memberNo', 'member_no'), 10) : null;
+  const companyName = pickBody(req.body, 'companyName', 'company_name') !== undefined ? String(pickBody(req.body, 'companyName', 'company_name') || "").trim() : null;
   const category = req.body?.category !== undefined ? String(req.body.category || "").trim().toLowerCase() : null;
   const expertise = req.body?.expertise !== undefined ? String(req.body.expertise || "").trim() : null;
-  const websiteUrl = req.body?.websiteUrl !== undefined ? normalizeUrl(req.body.websiteUrl) : null;
-  const socialUrl = req.body?.socialUrl !== undefined ? normalizeUrl(req.body.socialUrl) : null;
+  const websiteUrl = pickBody(req.body, 'websiteUrl', 'website_url') !== undefined ? normalizeUrl(pickBody(req.body, 'websiteUrl', 'website_url')) : null;
+  const socialUrl = pickBody(req.body, 'socialUrl', 'social_url') !== undefined ? normalizeUrl(pickBody(req.body, 'socialUrl', 'social_url')) : null;
 
   const validCategories = new Set(["logistica", "fabricacion", "servicios"]);
 
@@ -1339,6 +1519,7 @@ app.post("/subscribe", (req, res) => {
 async function start() {
   await initDb();
   await seedSociosIfEmpty();
+  await applySocioOverrides();
   await pruneDb();
 
   app.listen(PORT, () => {

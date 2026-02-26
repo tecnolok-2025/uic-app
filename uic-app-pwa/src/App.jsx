@@ -2,6 +2,9 @@ import React, { useEffect, useMemo, useState } from "react";
 import "./index.css";
 import logoUIC from "./assets/logo-uic.jpeg";
 
+// Versión visible (footer / ajustes)
+const APP_VERSION = "UIC App v0.22";
+
 const API_BASE = import.meta.env.VITE_API_BASE || ""; // ej: https://uic-campana-api.onrender.com
 
 function cls(...xs) {
@@ -38,7 +41,71 @@ async function apiGet(path) {
   return data;
 }
 
-async function hardRefresh() {
+async function trySetIconBadge(n) {
+  try {
+    if (typeof navigator?.setAppBadge === "function") {
+      await navigator.setAppBadge(n);
+    }
+  } catch (_) {
+    // ignore
+  }
+}
+
+async function tryClearIconBadge() {
+  try {
+    if (typeof navigator?.clearAppBadge === "function") {
+      await navigator.clearAppBadge();
+      return;
+    }
+    if (typeof navigator?.setAppBadge === "function") {
+      await navigator.setAppBadge(0);
+    }
+  } catch (_) {
+    // ignore
+  }
+}
+
+async function tryShowLocalNotification() {
+  // Objetivo: que Android muestre badge por notificación no leída.
+  // En iOS (PWA instalada) puede aparecer como notificación normal; el badge del icono
+  // se intenta con setAppBadge/clearAppBadge.
+  try {
+    if (!("Notification" in window)) return;
+    let perm = Notification.permission;
+    if (perm === "default") {
+      perm = await Notification.requestPermission();
+    }
+    if (perm !== "granted") return;
+
+    // Preferimos notificación "de página" para que persista aunque el SW se reinicie.
+    // eslint-disable-next-line no-new
+    new Notification("UIC", { body: "Actualización disponible / restablecida.", tag: "uic-update" });
+
+    // Si hay Service Worker listo, también disparar desde SW (mejor integración en Android).
+    if ("serviceWorker" in navigator) {
+      try {
+        const reg = await navigator.serviceWorker.ready;
+        await reg.showNotification("UIC", {
+          body: "Actualización disponible / restablecida.",
+          tag: "uic-update",
+          renotify: true,
+        });
+      } catch (_) {}
+    }
+  } catch (_) {
+    // ignore
+  }
+}
+
+async function hardRefreshWithBadge() {
+  // 1) Marcar intención de badge (se limpia en el *próximo* ingreso real a la app)
+  // Nota: no lo limpiamos inmediatamente porque si no nunca llegás a verlo en el ícono.
+  try {
+    localStorage.setItem("uic_icon_badge_set_at", String(Date.now()));
+    localStorage.setItem("uic_icon_badge_pending", "1");
+  } catch (_) {}
+
+  // 2) Restablecer (borrar SW + cache)
   try {
     if ("serviceWorker" in navigator) {
       const regs = await navigator.serviceWorker.getRegistrations();
@@ -51,6 +118,12 @@ async function hardRefresh() {
   } catch (_) {
     // ignore
   }
+
+  // 3) Setear badge + notificación (idealmente deja el badge visible en el ícono)
+  await trySetIconBadge(1);
+  await tryShowLocalNotification();
+
+  // 4) Recargar
   window.location.reload();
 }
 
@@ -109,6 +182,17 @@ export default function App() {
   const [sociosFormMode, setSociosFormMode] = useState("create"); // create | edit
   const [sociosEditing, setSociosEditing] = useState(null);
 
+  // Grilla/tabla (admin) para correcciones masivas
+  const [sociosGridOpen, setSociosGridOpen] = useState(false);
+  const [sociosGridItems, setSociosGridItems] = useState([]);
+  const [sociosGridLoading, setSociosGridLoading] = useState(false);
+  const [sociosGridError, setSociosGridError] = useState("");
+  const [sociosBulkOpen, setSociosBulkOpen] = useState(false);
+  const [sociosBulkText, setSociosBulkText] = useState("");
+  const [sociosBulkBusy, setSociosBulkBusy] = useState(false);
+  const [sociosBulkMsg, setSociosBulkMsg] = useState("");
+
+
 const [socioForm, setSocioForm] = useState({
   member_no: "",
   company_name: "",
@@ -151,6 +235,66 @@ useEffect(() => {
   }
 
   const canUseApi = useMemo(() => Boolean(API_BASE), []);
+
+  // --- Badge del icono (home screen) ---
+  // Comportamiento esperado para prueba:
+  // - Al presionar "Forzar actualización" se intenta poner badge=1.
+  // - Luego, al volver a abrir la app (después de salir a Home y reingresar), se intenta limpiar.
+  useEffect(() => {
+    const maybeClear = async () => {
+      let ts = 0;
+      try {
+        ts = parseInt(localStorage.getItem("uic_icon_badge_set_at") || "0", 10) || 0;
+      } catch (_) {
+        ts = 0;
+      }
+      if (!ts) return;
+      let pending = "";
+      let hiddenAt = 0;
+      try {
+        pending = localStorage.getItem("uic_icon_badge_pending") || "";
+        hiddenAt = parseInt(localStorage.getItem("uic_icon_badge_hidden_at") || "0", 10) || 0;
+      } catch (_) {
+        pending = "";
+        hiddenAt = 0;
+      }
+
+      // Solo limpiar cuando:
+      // - hay flag pendiente
+      // - el usuario efectivamente salió de la app (hidden) luego de setear el badge
+      // - pasaron unos segundos desde que se seteó
+      if (!pending) return;
+      if (Date.now() - ts < 5000) return;
+      if (!hiddenAt || hiddenAt < ts) return;
+
+      await tryClearIconBadge();
+      try {
+        if ("serviceWorker" in navigator) {
+          const reg = await navigator.serviceWorker.ready;
+          const notis = await reg.getNotifications({ tag: "uic-update" });
+          (notis || []).forEach((n) => n.close());
+        }
+      } catch (_) {}
+      try {
+        localStorage.removeItem("uic_icon_badge_set_at");
+        localStorage.removeItem("uic_icon_badge_pending");
+        localStorage.removeItem("uic_icon_badge_hidden_at");
+      } catch (_) {}
+    };
+
+    // al montar
+    maybeClear();
+
+    // al volver a la app
+    const onVis = () => {
+      if (document.visibilityState === "hidden") {
+        try { localStorage.setItem("uic_icon_badge_hidden_at", String(Date.now())); } catch (_) {}
+      }
+      if (document.visibilityState === "visible") maybeClear();
+    };
+    document.addEventListener("visibilitychange", onVis);
+    return () => document.removeEventListener("visibilitychange", onVis);
+  }, []);
 
   useEffect(() => {
     (async () => {
@@ -277,6 +421,7 @@ useEffect(() => {
     { label: "Comunicación al socio", href: "#", onClick: () => { setTab("comunicacion"); } },
     { label: "Socios", href: "#", onClick: () => { setTab("socios"); } },
     { label: "Requerimientos Institucionales", href: "https://cpf-web.onrender.com/" },
+    { label: "Próximamente", href: "#", disabled: true },
     { label: "Sitio UIC", href: "https://uic-campana.com.ar" },
   ];
 
@@ -776,11 +921,76 @@ async function createEvent(payload) {
     return j;
   }
 
+  async function updateSocioInline(id, payload) {
+    if (!canUseApi) throw new Error("Falta configurar VITE_API_BASE en el frontend.");
+    if (!isAdmin) throw new Error("Acceso denegado (clave admin).");
+    const r = await fetch(`${API_BASE}/socios/${encodeURIComponent(id)}`, {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+        "x-admin-token": adminToken,
+      },
+      body: JSON.stringify(payload),
+    });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(j.error || j.message || `HTTP ${r.status}`);
+    return j;
+  
+
+  async function bulkUpsertSocios(items) {
+    if (!canUseApi) throw new Error("Falta configurar VITE_API_BASE en el frontend.");
+    if (!isAdmin) throw new Error("Acceso denegado (clave admin).");
+
+    const r = await fetch(`${API_BASE}/socios/bulk`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-admin-token": adminToken,
+      },
+      body: JSON.stringify({ items }),
+    });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(j.error || j.message || `HTTP ${r.status}`);
+    return j;
+  }
+}
+
+  async function openSociosGrid() {
+    setSociosGridError("");
+    setSociosGridOpen(true);
+    setSociosGridLoading(true);
+    try {
+      // Traer todo (máximo 200) para edición masiva.
+      const qs = new URLSearchParams();
+      qs.set("page", "1");
+      qs.set("per_page", "200");
+      const data = await apiGet(`/socios?${qs.toString()}`);
+      setSociosGridItems(Array.isArray(data.items) ? data.items : []);
+    } catch (e) {
+      setSociosGridItems([]);
+      setSociosGridError(String(e?.message || e));
+    } finally {
+      setSociosGridLoading(false);
+    }
+  }
+
 function prettySocioCategory(cat) {
   const c = String(cat || "").toLowerCase();
   if (c === "logistica") return "Logística";
   if (c === "servicios") return "Servicios";
   return "Fabricación";
+}
+
+function downloadJson(filename, obj) {
+  const blob = new Blob([JSON.stringify(obj, null, 2)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 2000);
 }
 
 function normalizeUrl(u) {
@@ -1306,6 +1516,7 @@ async function submitSocioForm() {
         {isAdmin && (
           <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
             <button className="btnSmall" onClick={() => openSocioForm("create")}>Nuevo socio</button>
+            <button className="btnSmall" onClick={openSociosGrid}>Tabla / Grilla</button>
           </div>
         )}
       </div>
@@ -1526,6 +1737,214 @@ async function submitSocioForm() {
           </div>
         </div>
       ) : null}
+
+      {sociosGridOpen ? (
+        <div className="modalOverlay" onClick={() => setSociosGridOpen(false)}>
+          <div className="modal modalWide" onClick={(e) => e.stopPropagation()}>
+            <div className="modalTitle">Tabla / Grilla de Socios (Admin)</div>
+            <div className="modalSub">
+              Edición masiva de categoría, expertise y links. (Se publican solo Nº de socio + Empresa, pero los links se usan para abrir web/red.)
+            </div>
+
+
+            <div className="row" style={{ gap: 8, flexWrap: "wrap", marginTop: 10 }}>
+              <button
+                className="btnSmall"
+                onClick={() => {
+                  try {
+                    const exportItems = (sociosGridItems || []).map((s) => ({
+                      member_no: Number(s.member_no),
+                      company_name: String(s.company_name || "").trim(),
+                      category: String(s.category || "fabricacion"),
+                      expertise: String(s.expertise || "").trim(),
+                      website_url: String(s.website_url || "").trim(),
+                      social_url: String(s.social_url || "").trim(),
+                    }));
+                    downloadJson("uic_socios_export.json", exportItems);
+                  } catch (e) {
+                    alert(String(e?.message || e));
+                  }
+                }}
+              >
+                Exportar JSON
+              </button>
+
+              <button
+                className="btnSmall"
+                onClick={() => {
+                  setSociosBulkOpen((p) => !p);
+                  setSociosBulkMsg("");
+                }}
+              >
+                {sociosBulkOpen ? "Cerrar importación" : "Importar JSON"}
+              </button>
+
+              {sociosBulkMsg ? <span className="muted">{sociosBulkMsg}</span> : null}
+            </div>
+
+            {sociosBulkOpen ? (
+              <div style={{ marginTop: 10 }}>
+                <div className="muted" style={{ marginBottom: 6 }}>
+                  Pegá acá un JSON (array) con campos: member_no, company_name, category, expertise, website_url, social_url. Se hace <b>upsert</b> por Nº de socio.
+                </div>
+                <textarea
+                  className="input"
+                  style={{ width: "100%", minHeight: 160, fontFamily: "monospace", fontSize: 12 }}
+                  value={sociosBulkText}
+                  onChange={(e) => setSociosBulkText(e.target.value)}
+                  placeholder='[ { "member_no": 101, "company_name": "...", "category": "servicios", "expertise": "...", "website_url": "https://..." } ]'
+                />
+                <div className="rowEnd" style={{ marginTop: 8 }}>
+                  <button
+                    className="btnGhost"
+                    onClick={() => {
+                      setSociosBulkText("");
+                      setSociosBulkMsg("");
+                    }}
+                    disabled={sociosBulkBusy}
+                  >
+                    Limpiar
+                  </button>
+                  <button
+                    className="btnPrimary"
+                    disabled={sociosBulkBusy}
+                    onClick={async () => {
+                      try {
+                        setSociosBulkBusy(true);
+                        setSociosBulkMsg("");
+                        const parsed = JSON.parse(String(sociosBulkText || "[]"));
+                        if (!Array.isArray(parsed) || parsed.length === 0) throw new Error("JSON inválido o vacío.");
+
+                        const items = parsed.map((x) => ({
+                          member_no: Number(x.member_no ?? x.memberNo),
+                          company_name: String(x.company_name ?? x.companyName ?? "").trim(),
+                          category: String(x.category || "").trim().toLowerCase(),
+                          expertise: String(x.expertise || "").trim(),
+                          website_url: String(x.website_url ?? x.websiteUrl ?? "").trim(),
+                          social_url: String(x.social_url ?? x.socialUrl ?? "").trim(),
+                        }));
+
+                        await bulkUpsertSocios(items);
+                        setSociosBulkMsg(`Importación OK (${items.length})`);
+                        await openSociosGrid();
+                        await loadSocios({ page: 1, append: false, category: sociosCategory, q: sociosSearchQuery });
+                      } catch (e) {
+                        setSociosBulkMsg(`Error: ${String(e?.message || e)}`);
+                      } finally {
+                        setSociosBulkBusy(false);
+                      }
+                    }}
+                  >
+                    {sociosBulkBusy ? "Importando…" : "Aplicar importación"}
+                  </button>
+                </div>
+              </div>
+            ) : null}
+
+            {sociosGridError ? <div className="muted">⚠ {sociosGridError}</div> : null}
+            {sociosGridLoading ? <div className="muted">Cargando…</div> : null}
+
+            {!sociosGridLoading ? (
+              <div style={{ overflowX: "auto" }}>
+                <table className="gridTable">
+                  <thead>
+                    <tr>
+                      <th>Nº</th>
+                      <th>Empresa</th>
+                      <th>Categoría</th>
+                      <th>Expertise</th>
+                      <th>Web</th>
+                      <th>Red</th>
+                      <th>Guardar</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {sociosGridItems.map((s) => (
+                      <tr key={s.id}>
+                        <td style={{ whiteSpace: "nowrap" }}><b>{s.member_no}</b></td>
+                        <td style={{ minWidth: 220 }}>{s.company_name}</td>
+                        <td>
+                          <select
+                            className="input"
+                            value={s.category || "fabricacion"}
+                            onChange={(e) => {
+                              const v = e.target.value;
+                              setSociosGridItems((prev) => prev.map((x) => (x.id === s.id ? { ...x, category: v } : x)));
+                            }}
+                          >
+                            <option value="fabricacion">Fabricación</option>
+                            <option value="logistica">Logística</option>
+                            <option value="servicios">Servicios</option>
+                          </select>
+                        </td>
+                        <td>
+                          <input
+                            className="input"
+                            value={s.expertise || ""}
+                            placeholder="(corto)"
+                            onChange={(e) => {
+                              const v = e.target.value;
+                              setSociosGridItems((prev) => prev.map((x) => (x.id === s.id ? { ...x, expertise: v } : x)));
+                            }}
+                          />
+                        </td>
+                        <td>
+                          <input
+                            className="input"
+                            value={s.website_url || ""}
+                            placeholder="https://..."
+                            onChange={(e) => {
+                              const v = e.target.value;
+                              setSociosGridItems((prev) => prev.map((x) => (x.id === s.id ? { ...x, website_url: v } : x)));
+                            }}
+                          />
+                        </td>
+                        <td>
+                          <input
+                            className="input"
+                            value={s.social_url || ""}
+                            placeholder="https://..."
+                            onChange={(e) => {
+                              const v = e.target.value;
+                              setSociosGridItems((prev) => prev.map((x) => (x.id === s.id ? { ...x, social_url: v } : x)));
+                            }}
+                          />
+                        </td>
+                        <td style={{ whiteSpace: "nowrap" }}>
+                          <button
+                            className="btnSmall"
+                            onClick={async () => {
+                              try {
+                                const payload = {
+                                  category: String(s.category || "fabricacion"),
+                                  expertise: String(s.expertise || "").trim(),
+                                  website_url: normalizeUrl(s.website_url),
+                                  social_url: normalizeUrl(s.social_url),
+                                };
+                                await updateSocioInline(s.id, payload);
+                                // refrescar lista principal (respetando filtros actuales)
+                                await loadSocios({ page: 1, append: false, category: sociosCategory, q: sociosSearchQuery });
+                              } catch (e) {
+                                alert(String(e?.message || e));
+                              }
+                            }}
+                          >
+                            Guardar
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : null}
+
+            <div className="rowEnd" style={{ marginTop: 10 }}>
+              <button className="btnGhost" onClick={() => setSociosGridOpen(false)}>Cerrar</button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </section>
   </main>
 )}
@@ -1533,13 +1952,14 @@ async function submitSocioForm() {
           <section className="card">
             <div className="cardTitle">Ajustes</div>
             <div className="muted">
+              <div>Versión: {APP_VERSION}</div>
               <div>API: {API_BASE || "(sin configurar)"}</div>
               <div>Estado API: {apiStatus?.ok ? "OK" : "NO OK"}</div>
               <div style={{ marginTop: 10 }}>
                 <b>iPhone (PWA):</b> para “instalar” la app, abrí en Safari → Compartir → <i>Agregar a inicio</i>.
               </div>
               <div style={{ marginTop: 12 }}>
-                <button className="btnPrimary" onClick={hardRefresh}>Forzar actualización</button>
+                <button className="btnPrimary" onClick={hardRefreshWithBadge}>Forzar actualización</button>
                 <div className="muted" style={{ marginTop: 6, fontSize: 12 }}>
                   Si el celular no toma cambios, este botón intenta borrar cache y service worker y recargar.
                 </div>
@@ -1548,6 +1968,8 @@ async function submitSocioForm() {
           </section>
         )}
       </main>
+
+      <div className="appFooter">{APP_VERSION}</div>
 
       <nav className="bottomNav">
         <button className={cls("navBtn", tab === "inicio" && "navActive")} onClick={() => setTab("inicio")}>
