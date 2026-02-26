@@ -62,7 +62,8 @@ export default function App() {
   const [loadingPosts, setLoadingPosts] = useState(false);
   const [errorPosts, setErrorPosts] = useState("");
 
-  const [search, setSearch] = useState("");
+  const [searchDraft, setSearchDraft] = useState("");
+  const [searchQuery, setSearchQuery] = useState("");
   const [categorySlug, setCategorySlug] = useState("todas"); // todas | beneficios | eventos
   const categoryParam = categorySlug === "todas" ? "" : categorySlug;
 
@@ -95,6 +96,12 @@ export default function App() {
   const [commsUnseen, setCommsUnseen] = useState(0);
   const [commsComposeOpen, setCommsComposeOpen] = useState(false);
 
+  function markCommsSeen(updatedAt) {
+    const v = (updatedAt || new Date().toISOString()).toString();
+    try { localStorage.setItem("uic_comms_seen_at", v); } catch (_) {}
+    setCommsUnseen(0);
+  }
+
   const canUseApi = useMemo(() => Boolean(API_BASE), []);
 
   useEffect(() => {
@@ -119,7 +126,7 @@ export default function App() {
   }
 
   async function loadPosts(opts = {}) {
-    const { perPage = 6, page = 1, limitTotal = 100, category = categoryParam, q = search, append = false } = opts;
+    const { perPage = 6, page = 1, limitTotal = 100, category = categoryParam, q = searchQuery, append = false } = opts;
 
     if (!canUseApi) {
       setErrorPosts("Falta configurar VITE_API_BASE en el frontend.");
@@ -137,7 +144,14 @@ export default function App() {
       if (category) qs.set("category", category);
 
       const data = await apiGet(`/wp/posts?${qs.toString()}`);
-      const items = (data.items || []).map(normalizePost);
+      const raw = (data.items || []).map(normalizePost);
+      const terms = (q || "").toString().trim().toLowerCase().split(/\s+/).filter(Boolean);
+      const items = terms.length
+        ? raw.filter((it) => {
+            const hay = `${it.title || ""} ${it.excerpt || ""}`.toLowerCase();
+            return terms.every((t) => hay.includes(t));
+          })
+        : raw;
       setPosts((prev) => {
         if (!append) return items;
         const seen = new Set((prev || []).map((x) => x.id));
@@ -173,12 +187,18 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [canUseApi]);
 
-  // Re-carga cuando cambia filtro en Publicaciones o Inicio
+  // Re-carga cuando cambia filtro o búsqueda (solo al confirmar búsqueda)
   useEffect(() => {
-    if (tab !== "publicaciones" && tab !== "inicio") return;
-    loadPosts({ perPage: 6, page: 1, append: false });
+    if (tab === "inicio") {
+      // En Inicio, siempre mostrar últimas publicaciones (sin búsqueda)
+      loadPosts({ perPage: 6, page: 1, append: false, q: "" });
+      return;
+    }
+    if (tab === "publicaciones") {
+      loadPosts({ perPage: 6, page: 1, append: false, q: searchQuery });
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tab, categorySlug]);
+  }, [tab, categorySlug, searchQuery]);
 
   useEffect(() => {
     if (tab !== "agenda") return;
@@ -190,7 +210,6 @@ export default function App() {
   useEffect(() => {
     if (tab !== "comunicacion") return;
     loadComms(10);
-    if (commsMeta?.updatedAt) markCommsSeen(commsMeta.updatedAt);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab]);
 
@@ -451,8 +470,15 @@ async function createEvent(payload) {
       if (data.updatedAt) {
         setCommsMeta((m) => ({ ...m, updatedAt: data.updatedAt }));
         const lastSeen = localStorage.getItem("uic_comms_seen_at") || "";
-        if ((data.items || []).length > 0 && data.updatedAt !== lastSeen) setCommsUnseen(1);
-        if ((data.items || []).length === 0) setCommsUnseen(0);
+        if ((data.items || []).length === 0) {
+          setCommsUnseen(0);
+        } else if (data.updatedAt && data.updatedAt !== lastSeen) {
+          setCommsUnseen(1);
+        } else {
+          setCommsUnseen(0);
+        }
+        // Si el usuario está en la pestaña Comunicación, marcar como visto automáticamente
+        if (tab === "comunicacion" && data.updatedAt) markCommsSeen(data.updatedAt);
       }
     } catch {
       // ignorar
@@ -614,11 +640,35 @@ async function createEvent(payload) {
               <input
                 className="input"
                 placeholder="Buscar…"
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
+                value={searchDraft}
+                onChange={(e) => setSearchDraft(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    const q = (searchDraft || "").trim();
+                    setSearchQuery(q);
+                    loadPosts({ perPage: 6, page: 1, q });
+                  }
+                }}
               />
-              <button className="btnPrimary" onClick={() => loadPosts({ perPage: 6, page: 1, q: search })}>
+              <button
+                className="btnPrimary"
+                onClick={() => {
+                  const q = (searchDraft || "").trim();
+                  setSearchQuery(q);
+                  loadPosts({ perPage: 6, page: 1, q });
+                }}
+              >
                 Buscar
+              </button>
+              <button
+                className="btnSecondary"
+                onClick={() => {
+                  setSearchDraft("");
+                  setSearchQuery("");
+                  loadPosts({ perPage: 6, page: 1, q: "" });
+                }}
+              >
+                Limpiar
               </button>
             </div>
 
