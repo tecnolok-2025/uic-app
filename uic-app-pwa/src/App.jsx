@@ -79,7 +79,14 @@ export default function App() {
     return new Date(n.getFullYear(), n.getMonth(), 1);
   });
   const [selectedDate, setSelectedDate] = useState(null);
-  const [adminToken, setAdminToken] = useState(() => localStorage.getItem("uic_admin_token") || "");
+  // Admin token: se considera "admin" SOLO si el token está guardado (persistido) en el dispositivo.
+  // Evita el bug donde al escribir la primera letra en "Clave admin" cambia de panel automáticamente.
+  const [adminToken, setAdminToken] = useState(() => (localStorage.getItem("uic_admin_token") || "").trim());
+  const [adminDraft, setAdminDraft] = useState(() => (localStorage.getItem("uic_admin_token") || "").trim());
+  useEffect(() => {
+    setAdminDraft(adminToken);
+  }, [adminToken]);
+
   const isAdmin = Boolean(adminToken);
 
   // Comunicación al socio
@@ -405,7 +412,8 @@ async function createEvent(payload) {
     async function submit() {
       try {
         setSaving(true);
-        await onPublish({ title, message });
+        const safeTitle = (title || "").toString().trim() || "Comunicado";
+        await onPublish({ title: safeTitle, message });
         setTitle("");
         setMessage("");
         alert("Comunicación publicada.");
@@ -418,7 +426,7 @@ async function createEvent(payload) {
 
     return (
       <div className="eventForm" style={{ marginTop: 10 }}>
-        <input className="input" placeholder="Título" value={title} onChange={(e) => setTitle(e.target.value)} />
+        <input className="input" placeholder="Título (opcional)" value={title} onChange={(e) => setTitle(e.target.value)} />
         <textarea
           className="textarea"
           placeholder="Mensaje para el socio"
@@ -426,7 +434,7 @@ async function createEvent(payload) {
           onChange={(e) => setMessage(e.target.value)}
           rows={4}
         />
-        <button className="btnPrimary" disabled={saving || !title.trim() || !message.trim()} onClick={submit}>
+        <button className="btnPrimary" disabled={saving || !message.trim()} onClick={submit}>
           {saving ? "Publicando…" : "Publicar"}
         </button>
       </div>
@@ -806,13 +814,17 @@ async function createEvent(payload) {
                           <input
                             className="input"
                             placeholder="Clave admin"
-                            value={adminToken}
-                            onChange={(e) => setAdminToken(e.target.value)}
+                            value={adminDraft}
+                            onChange={(e) => setAdminDraft(e.target.value)}
+                            onKeyDown={(e) => e.stopPropagation()}
                           />
                           <button
                             className="btnSecondary"
                             onClick={() => {
-                              localStorage.setItem("uic_admin_token", adminToken);
+                              const tok = (adminDraft || "").toString().trim();
+                              if (!tok) return alert("Ingresá la clave admin.");
+                              localStorage.setItem("uic_admin_token", tok);
+                              setAdminToken(tok);
                               alert("Token guardado en este dispositivo.");
                             }}
                           >
@@ -845,14 +857,18 @@ async function createEvent(payload) {
                     <input
                       className="input"
                       placeholder="Clave admin"
-                      value={adminToken}
-                      onChange={(e) => setAdminToken(e.target.value)}
+                      value={adminDraft}
+                      onChange={(e) => setAdminDraft(e.target.value)}
+                      onKeyDown={(e) => e.stopPropagation()}
                       style={{ width: 160 }}
                     />
                     <button
                       className="btnSecondary"
                       onClick={() => {
-                        localStorage.setItem("uic_admin_token", adminToken);
+                        const tok = (adminDraft || "").toString().trim();
+                        if (!tok) return alert("Ingresá la clave admin.");
+                        localStorage.setItem("uic_admin_token", tok);
+                        setAdminToken(tok);
                         alert("Token guardado en este dispositivo.");
                       }}
                     >

@@ -771,10 +771,11 @@ app.get("/comms", async (req, res) => {
 });
 
 app.post("/comms", requireAdmin, async (req, res) => {
-  const title = (req.body?.title || "").toString().trim();
+  let title = (req.body?.title || "").toString().trim();
   const message = (req.body?.message || "").toString().trim();
 
-  if (!title) return res.status(400).json({ error: "title requerido" });
+  // WhatsApp-like: el título es opcional. Si viene vacío, usamos uno por defecto.
+  if (!title) title = "Comunicado";
   if (!message) return res.status(400).json({ error: "message requerido" });
 
   const now = new Date().toISOString();
