@@ -5,6 +5,7 @@ import { XMLParser } from "fast-xml-parser";
 import fs from "fs";
 import path from "path";
 import { Pool } from "pg";
+import crypto from "crypto";
 
 // En ESM no existe __dirname por defecto
 const __dirname = path.dirname(new URL(import.meta.url).pathname);
@@ -24,8 +25,9 @@ const __dirname = path.dirname(new URL(import.meta.url).pathname);
 /* ----------------------------- Config ---------------------------------- */
 
 // v0.24: versión visible para diagnóstico
-const API_VERSION = (process.env.API_VERSION || "0.24.0").trim();
+const API_VERSION = (process.env.API_VERSION || "0.26.0").trim();
 const API_BUILD_STAMP = (process.env.API_BUILD_STAMP || new Date().toISOString()).trim();
+const API_COMMIT = (process.env.RENDER_GIT_COMMIT || process.env.GITHUB_SHA || process.env.GIT_COMMIT || "").slice(0, 7);
 
 
 const PORT = process.env.PORT || 10000;
@@ -214,6 +216,9 @@ function normalizeSocioCategoryInput(raw) {
   return ""; // inválida
 }
 
+
+let MEMBER_CREDS_STORE = null;
+let MESSAGES_STORE = null;
 let dbReady = false;
 let pool = null;
 
@@ -466,7 +471,32 @@ async function initDb() {
     await pool.query(`CREATE INDEX IF NOT EXISTS uic_socios_category_idx ON uic_socios(category)`);
     await pool.query(`CREATE INDEX IF NOT EXISTS uic_socios_name_idx ON uic_socios(LOWER(company_name))`);
 
-    dbReady = true;
+    
+    // Mensajes de socios (portal tipo WhatsApp) + credenciales simples por socio
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS uic_member_credentials (
+        member_no INT PRIMARY KEY,
+        password_hash TEXT NOT NULL,
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `);
+
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS uic_messages (
+        id TEXT PRIMARY KEY,
+        thread_member_no INT NOT NULL,
+        from_role TEXT NOT NULL, -- 'member' | 'admin'
+        message TEXT NOT NULL,
+        read_by_admin BOOLEAN NOT NULL DEFAULT FALSE,
+        read_by_member BOOLEAN NOT NULL DEFAULT FALSE,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `);
+    await pool.query(`CREATE INDEX IF NOT EXISTS uic_messages_thread_idx ON uic_messages(thread_member_no, created_at)`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS uic_messages_admin_unread_idx ON uic_messages(read_by_admin, from_role)`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS uic_messages_member_unread_idx ON uic_messages(read_by_member, from_role)`);
+
+dbReady = true;
     console.log("✅ DB externa habilitada (DATABASE_URL). Persistencia OK.");
   } catch (e) {
     dbReady = false;
@@ -616,6 +646,125 @@ function requireAdmin(req, res, next) {
   }
   const t = (req.header("x-admin-token") || "").trim();
   if (t !== EVENT_ADMIN_TOKEN) return res.status(401).json({ error: "No autorizado." });
+  next();
+}
+
+
+
+// --------------------- Member (Socio) auth helpers ----------------------
+//
+// Objetivo: permitir que cada socio pueda enviar mensajes al admin y ver solo los suyos.
+// La clave inicial por defecto es: <primer_token_empresa>_2026 (ej: motores_2026, jusa_2026, jm_2026).
+// Se permite cambiar clave (opcional) y resetear a la clave por defecto.
+
+const MEMBER_TOKEN_SECRET = (process.env.MEMBER_TOKEN_SECRET || process.env.EVENT_ADMIN_TOKEN || "dev-member-secret").trim();
+
+function toAsciiLower(s) {
+  return String(s || "")
+    .trim()
+    .normalize("NFD")
+    .replace(/\p{Diacritic}+/gu, "")
+    .toLowerCase();
+}
+
+function firstCompanyToken(companyName) {
+  const raw = String(companyName || "").trim();
+  const first = raw.split(/\s+/)[0] || "";
+  // solo letras/números
+  const cleaned = first.normalize("NFD").replace(/\p{Diacritic}+/gu, "").replace(/[^a-zA-Z0-9]/g, "");
+  return cleaned || "socio";
+}
+
+function defaultMemberPassword(companyName) {
+  // Por compatibilidad, devolvemos en minúsculas. La validación es case-insensitive.
+  return `${toAsciiLower(firstCompanyToken(companyName))}_2026`;
+}
+
+function scryptHash(password) {
+    const salt = crypto.randomBytes(16);
+  const key = crypto.scryptSync(String(password), salt, 32);
+  return `scrypt$${salt.toString("hex")}$${key.toString("hex")}`;
+}
+
+function scryptVerify(password, stored) {
+  try {
+        const parts = String(stored || "").split("$");
+    if (parts.length !== 3 || parts[0] !== "scrypt") return false;
+    const salt = Buffer.from(parts[1], "hex");
+    const key = Buffer.from(parts[2], "hex");
+    const derived = crypto.scryptSync(String(password), salt, key.length);
+    return crypto.timingSafeEqual(key, derived);
+  } catch (_) {
+    return false;
+  }
+}
+
+function signMemberToken(memberNo, ttlSeconds = 60 * 60 * 24 * 30) {
+    const exp = Math.floor(Date.now() / 1000) + ttlSeconds;
+  const payload = `${memberNo}.${exp}`;
+  const sig = crypto.createHmac("sha256", MEMBER_TOKEN_SECRET).update(payload).digest("hex");
+  return `${payload}.${sig}`;
+}
+
+function verifyMemberToken(token) {
+  try {
+        const t = String(token || "").trim();
+    const [memberNoStr, expStr, sig] = t.split(".");
+    if (!memberNoStr || !expStr || !sig) return null;
+    const payload = `${memberNoStr}.${expStr}`;
+    const expect = crypto.createHmac("sha256", MEMBER_TOKEN_SECRET).update(payload).digest("hex");
+    if (expect.length !== sig.length) return null;
+    if (!crypto.timingSafeEqual(Buffer.from(expect), Buffer.from(sig))) return null;
+    const exp = parseInt(expStr, 10);
+    if (!exp || exp < Math.floor(Date.now() / 1000)) return null;
+    const memberNo = parseInt(memberNoStr, 10);
+    if (!memberNo) return null;
+    return { memberNo, exp };
+  } catch (_) {
+    return null;
+  }
+}
+
+async function getSocioByMemberNo(memberNo) {
+  if (!memberNo) return null;
+  if (dbReady) {
+    const r = await pool.query("SELECT member_no, company_name FROM uic_socios WHERE member_no = $1", [memberNo]);
+    return r.rows?.[0] || null;
+  }
+  const it = (SOCIOS_STORE.items || []).find((x) => Number(x.member_no) === Number(memberNo));
+  if (!it) return null;
+  return { member_no: it.member_no, company_name: it.company_name };
+}
+
+async function getOrCreateMemberCredential(memberNo, companyName) {
+  const defPw = defaultMemberPassword(companyName);
+
+  if (dbReady) {
+    const r = await pool.query("SELECT member_no, password_hash FROM uic_member_credentials WHERE member_no = $1", [memberNo]);
+    if (r.rowCount) {
+      return { memberNo, passwordHash: r.rows[0].password_hash, defaultPassword: defPw };
+    }
+    const h = scryptHash(defPw);
+    await pool.query(
+      "INSERT INTO uic_member_credentials(member_no, password_hash) VALUES ($1, $2) ON CONFLICT (member_no) DO NOTHING",
+      [memberNo, h]
+    );
+    return { memberNo, passwordHash: h, defaultPassword: defPw };
+  }
+
+  // fallback in-memory
+  MEMBER_CREDS_STORE = MEMBER_CREDS_STORE || {};
+  if (!MEMBER_CREDS_STORE[String(memberNo)]) {
+    MEMBER_CREDS_STORE[String(memberNo)] = { password_hash: scryptHash(defPw), updated_at: new Date().toISOString() };
+  }
+  return { memberNo, passwordHash: MEMBER_CREDS_STORE[String(memberNo)].password_hash, defaultPassword: defPw };
+}
+
+function requireMember(req, res, next) {
+  const tok = (req.header("x-member-token") || "").trim();
+  const v = verifyMemberToken(tok);
+  if (!v) return res.status(401).json({ error: "No autorizado." });
+  req.member = v;
   next();
 }
 
@@ -824,7 +973,7 @@ app.get("/", (req, res) => {
 });
 
 app.get("/health", (req, res) => res.json({ ok: true }));
-app.get("/version", (req, res) => res.json({ ok: true, apiVersion: API_VERSION, build: API_BUILD_STAMP }));
+app.get("/version", (req, res) => res.json({ ok: true, apiVersion: API_VERSION, build: API_BUILD_STAMP, commit: API_COMMIT || "" }));
 
 /* ------------------------- WordPress (posts) ---------------------------- */
 
@@ -1593,6 +1742,298 @@ app.delete("/socios/:id", requireAdmin, async (req, res) => {
   if ((SOCIOS_STORE.items || []).length === before) return res.status(404).json({ error: "Socio no encontrado" });
   touchSociosStore();
   return res.json({ ok: true });
+});
+
+
+
+/* --------------------- Member login / password endpoints ---------------- */
+
+app.post("/member/login", async (req, res) => {
+  try {
+    const memberNo = parseInt(req.body?.member_no ?? req.body?.memberNo, 10);
+    const passwordRaw = String(req.body?.password || "");
+    if (!memberNo) return res.status(400).json({ error: "member_no requerido" });
+    if (!passwordRaw) return res.status(400).json({ error: "password requerido" });
+
+    const socio = await getSocioByMemberNo(memberNo);
+    if (!socio) return res.status(404).json({ error: "Socio no encontrado" });
+
+    const creds = await getOrCreateMemberCredential(memberNo, socio.company_name);
+    const passwordNorm = toAsciiLower(passwordRaw);
+    const ok = scryptVerify(passwordNorm, creds.passwordHash);
+
+    if (!ok) return res.status(401).json({ error: "Clave incorrecta" });
+
+    const defPw = creds.defaultPassword;
+    const usingDefault = passwordNorm === toAsciiLower(defPw);
+    const token = signMemberToken(memberNo);
+
+    return res.json({
+      ok: true,
+      token,
+      member_no: memberNo,
+      company_name: socio.company_name,
+      usingDefault,
+      default_hint: defPw, // el frontend puede mostrarlo solo al propio socio (ya lo conoce)
+    });
+  } catch (e) {
+    console.log("⚠️ member/login error:", e?.message || e);
+    return res.status(500).json({ error: "Error interno" });
+  }
+});
+
+app.post("/member/change-password", requireMember, async (req, res) => {
+  try {
+    const memberNo = req.member.memberNo;
+    const oldPw = String(req.body?.old_password || req.body?.oldPassword || "");
+    const newPw = String(req.body?.new_password || req.body?.newPassword || "");
+    if (!oldPw || !newPw) return res.status(400).json({ error: "old_password y new_password requeridos" });
+
+    const socio = await getSocioByMemberNo(memberNo);
+    if (!socio) return res.status(404).json({ error: "Socio no encontrado" });
+
+    const creds = await getOrCreateMemberCredential(memberNo, socio.company_name);
+    if (!scryptVerify(toAsciiLower(oldPw), creds.passwordHash)) return res.status(401).json({ error: "Clave actual incorrecta" });
+
+    const newHash = scryptHash(toAsciiLower(newPw));
+    if (dbReady) {
+      await pool.query("INSERT INTO uic_member_credentials(member_no, password_hash, updated_at) VALUES ($1,$2,NOW()) ON CONFLICT (member_no) DO UPDATE SET password_hash = EXCLUDED.password_hash, updated_at = NOW()", [memberNo, newHash]);
+    } else {
+      MEMBER_CREDS_STORE = MEMBER_CREDS_STORE || {};
+      MEMBER_CREDS_STORE[String(memberNo)] = { password_hash: newHash, updated_at: new Date().toISOString() };
+    }
+    return res.json({ ok: true });
+  } catch (e) {
+    console.log("⚠️ member/change-password error:", e?.message || e);
+    return res.status(500).json({ error: "Error interno" });
+  }
+});
+
+app.post("/member/reset-password", async (req, res) => {
+  try {
+    const memberNo = parseInt(req.body?.member_no ?? req.body?.memberNo, 10);
+    if (!memberNo) return res.status(400).json({ error: "member_no requerido" });
+
+    const socio = await getSocioByMemberNo(memberNo);
+    if (!socio) return res.status(404).json({ error: "Socio no encontrado" });
+
+    const defPw = defaultMemberPassword(socio.company_name);
+    const h = scryptHash(defPw);
+
+    if (dbReady) {
+      await pool.query("INSERT INTO uic_member_credentials(member_no, password_hash, updated_at) VALUES ($1,$2,NOW()) ON CONFLICT (member_no) DO UPDATE SET password_hash = EXCLUDED.password_hash, updated_at = NOW()", [memberNo, h]);
+    } else {
+      MEMBER_CREDS_STORE = MEMBER_CREDS_STORE || {};
+      MEMBER_CREDS_STORE[String(memberNo)] = { password_hash: h, updated_at: new Date().toISOString() };
+    }
+
+    return res.json({ ok: true, default_hint: defPw });
+  } catch (e) {
+    console.log("⚠️ member/reset-password error:", e?.message || e);
+    return res.status(500).json({ error: "Error interno" });
+  }
+});
+
+/* --------------------- Mensajes del socio endpoints --------------------- */
+
+// Meta (para badges)
+app.get("/messages/meta", async (req, res) => {
+  const adminTok = (req.header("x-admin-token") || "").trim();
+  const memberTok = (req.header("x-member-token") || "").trim();
+
+  // admin
+  if (EVENT_ADMIN_TOKEN && adminTok && adminTok === EVENT_ADMIN_TOKEN) {
+    try {
+      if (dbReady) {
+        const r = await pool.query("SELECT COUNT(*)::int AS c FROM uic_messages WHERE from_role='member' AND read_by_admin = FALSE");
+        return res.json({ ok: true, role: "admin", unread: r.rows?.[0]?.c || 0 });
+      }
+    } catch (e) {
+      console.log("⚠️ messages/meta admin DB error:", e?.message || e);
+    }
+    // fallback memory not implemented
+    return res.json({ ok: true, role: "admin", unread: 0 });
+  }
+
+  // member
+  const v = verifyMemberToken(memberTok);
+  if (v) {
+    try {
+      if (dbReady) {
+        const r = await pool.query(
+          "SELECT COUNT(*)::int AS c FROM uic_messages WHERE thread_member_no = $1 AND from_role='admin' AND read_by_member = FALSE",
+          [v.memberNo]
+        );
+        return res.json({ ok: true, role: "member", unread: r.rows?.[0]?.c || 0 });
+      }
+    } catch (e) {
+      console.log("⚠️ messages/meta member DB error:", e?.message || e);
+    }
+    return res.json({ ok: true, role: "member", unread: 0 });
+  }
+
+  return res.json({ ok: true, role: "guest", unread: 0 });
+});
+
+// Threads inbox (admin)
+app.get("/admin/messages/threads", requireAdmin, async (req, res) => {
+  try {
+    if (dbReady) {
+      const r = await pool.query(`
+        SELECT 
+          s.member_no,
+          s.company_name,
+          MAX(m.created_at) AS last_at,
+          (SELECT message FROM uic_messages mm WHERE mm.thread_member_no=s.member_no ORDER BY mm.created_at DESC LIMIT 1) AS last_message,
+          (SELECT COUNT(*)::int FROM uic_messages mu WHERE mu.thread_member_no=s.member_no AND mu.from_role='member' AND mu.read_by_admin=FALSE) AS unread_for_admin
+        FROM uic_socios s
+        LEFT JOIN uic_messages m ON m.thread_member_no = s.member_no
+        GROUP BY s.member_no, s.company_name
+        ORDER BY last_at DESC NULLS LAST, s.company_name ASC
+        LIMIT 500
+      `);
+
+      const threads = (r.rows || []).map((x) => ({
+        memberNo: x.member_no,
+        companyName: x.company_name,
+        lastAt: x.last_at ? new Date(x.last_at).toISOString() : "",
+        lastMessage: x.last_message || "",
+        unreadForAdmin: x.unread_for_admin || 0,
+      }));
+
+      const totalUnread = threads.reduce((a, t) => a + (t.unreadForAdmin || 0), 0);
+      return res.json({ ok: true, totalUnread, threads });
+    }
+    return res.json({ ok: true, totalUnread: 0, threads: [] });
+  } catch (e) {
+    console.log("⚠️ admin/messages/threads error:", e?.message || e);
+    return res.status(500).json({ error: "Error interno" });
+  }
+});
+
+// Thread messages (admin)
+app.get("/admin/messages/thread/:memberNo", requireAdmin, async (req, res) => {
+  try {
+    const memberNo = parseInt(req.params.memberNo, 10);
+    if (!memberNo) return res.status(400).json({ error: "memberNo inválido" });
+    if (dbReady) {
+      const r = await pool.query(
+        "SELECT id, thread_member_no, from_role, message, read_by_admin, read_by_member, created_at FROM uic_messages WHERE thread_member_no=$1 ORDER BY created_at ASC LIMIT 2000",
+        [memberNo]
+      );
+      const items = (r.rows || []).map((x) => ({
+        id: x.id,
+        memberNo: x.thread_member_no,
+        from: x.from_role,
+        message: x.message,
+        readByAdmin: x.read_by_admin,
+        readByMember: x.read_by_member,
+        createdAt: x.created_at ? new Date(x.created_at).toISOString() : "",
+      }));
+      return res.json({ ok: true, items });
+    }
+    return res.json({ ok: true, items: [] });
+  } catch (e) {
+    console.log("⚠️ admin/messages/thread error:", e?.message || e);
+    return res.status(500).json({ error: "Error interno" });
+  }
+});
+
+app.post("/admin/messages/thread/:memberNo/mark-read", requireAdmin, async (req, res) => {
+  try {
+    const memberNo = parseInt(req.params.memberNo, 10);
+    if (!memberNo) return res.status(400).json({ error: "memberNo inválido" });
+    if (dbReady) {
+      await pool.query("UPDATE uic_messages SET read_by_admin=TRUE WHERE thread_member_no=$1 AND from_role='member' AND read_by_admin=FALSE", [memberNo]);
+    }
+    return res.json({ ok: true });
+  } catch (e) {
+    console.log("⚠️ admin/messages/mark-read error:", e?.message || e);
+    return res.status(500).json({ error: "Error interno" });
+  }
+});
+
+app.post("/admin/messages/thread/:memberNo/reply", requireAdmin, async (req, res) => {
+  try {
+    const memberNo = parseInt(req.params.memberNo, 10);
+    const message = String(req.body?.message || "").trim();
+    if (!memberNo) return res.status(400).json({ error: "memberNo inválido" });
+    if (!message) return res.status(400).json({ error: "message requerido" });
+
+    const id = "m_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 8);
+
+    if (dbReady) {
+      await pool.query(
+        "INSERT INTO uic_messages(id, thread_member_no, from_role, message, read_by_admin, read_by_member) VALUES ($1,$2,'admin',$3,TRUE,FALSE)",
+        [id, memberNo, message]
+      );
+    }
+    return res.json({ ok: true, id });
+  } catch (e) {
+    console.log("⚠️ admin/messages/reply error:", e?.message || e);
+    return res.status(500).json({ error: "Error interno" });
+  }
+});
+
+// Thread messages (member)
+app.get("/member/messages", requireMember, async (req, res) => {
+  try {
+    const memberNo = req.member.memberNo;
+    if (dbReady) {
+      const r = await pool.query(
+        "SELECT id, thread_member_no, from_role, message, read_by_admin, read_by_member, created_at FROM uic_messages WHERE thread_member_no=$1 ORDER BY created_at ASC LIMIT 2000",
+        [memberNo]
+      );
+      const items = (r.rows || []).map((x) => ({
+        id: x.id,
+        memberNo: x.thread_member_no,
+        from: x.from_role,
+        message: x.message,
+        readByAdmin: x.read_by_admin,
+        readByMember: x.read_by_member,
+        createdAt: x.created_at ? new Date(x.created_at).toISOString() : "",
+      }));
+      return res.json({ ok: true, items });
+    }
+    return res.json({ ok: true, items: [] });
+  } catch (e) {
+    console.log("⚠️ member/messages error:", e?.message || e);
+    return res.status(500).json({ error: "Error interno" });
+  }
+});
+
+app.post("/member/messages", requireMember, async (req, res) => {
+  try {
+    const memberNo = req.member.memberNo;
+    const message = String(req.body?.message || "").trim();
+    if (!message) return res.status(400).json({ error: "message requerido" });
+
+    const id = "m_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 8);
+
+    if (dbReady) {
+      await pool.query(
+        "INSERT INTO uic_messages(id, thread_member_no, from_role, message, read_by_admin, read_by_member) VALUES ($1,$2,'member',$3,FALSE,TRUE)",
+        [id, memberNo, message]
+      );
+    }
+    return res.json({ ok: true, id });
+  } catch (e) {
+    console.log("⚠️ member/messages post error:", e?.message || e);
+    return res.status(500).json({ error: "Error interno" });
+  }
+});
+
+app.post("/member/messages/mark-read", requireMember, async (req, res) => {
+  try {
+    const memberNo = req.member.memberNo;
+    if (dbReady) {
+      await pool.query("UPDATE uic_messages SET read_by_member=TRUE WHERE thread_member_no=$1 AND from_role='admin' AND read_by_member=FALSE", [memberNo]);
+    }
+    return res.json({ ok: true });
+  } catch (e) {
+    console.log("⚠️ member/messages/mark-read error:", e?.message || e);
+    return res.status(500).json({ error: "Error interno" });
+  }
 });
 
 /* ----------------------------- Push endpoints --------------------------- */

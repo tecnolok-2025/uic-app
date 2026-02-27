@@ -1,11 +1,13 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import "./index.css";
 import logoUIC from "./assets/logo-uic.jpeg";
 
 // Versión visible (footer / ajustes)
-const APP_VERSION = "UIC App v0.24";
+const PWA_VERSION = (typeof __UIC_PWA_VERSION__ !== "undefined") ? __UIC_PWA_VERSION__ : "0.26.0";
+const APP_VERSION = `UIC App v`;
 const BUILD_STAMP = (typeof __UIC_BUILD_STAMP__ !== "undefined") ? __UIC_BUILD_STAMP__ : "";
 const PWA_CACHE_ID = (typeof __UIC_CACHE_ID__ !== "undefined") ? __UIC_CACHE_ID__ : "";
+const BUILD_COMMIT = (typeof __UIC_COMMIT__ !== "undefined") ? __UIC_COMMIT__ : "";
 
 const API_BASE = import.meta.env.VITE_API_BASE || ""; // ej: https://uic-campana-api.onrender.com
 
@@ -99,15 +101,11 @@ async function tryShowLocalNotification() {
   }
 }
 
-async function hardRefreshWithBadge() {
-  // 1) Marcar intención de badge (se limpia en el *próximo* ingreso real a la app)
-  // Nota: no lo limpiamos inmediatamente porque si no nunca llegás a verlo en el ícono.
+async function hardRefreshWithBadge(onStart) {
   try {
-    localStorage.setItem("uic_icon_badge_set_at", String(Date.now()));
-    localStorage.setItem("uic_icon_badge_pending", "1");
+    if (typeof onStart === "function") onStart();
   } catch (_) {}
-
-  // 2) Restablecer (borrar SW + cache)
+  // Restablecer (borrar SW + cache)
   try {
     if ("serviceWorker" in navigator) {
       const regs = await navigator.serviceWorker.getRegistrations();
@@ -121,14 +119,13 @@ async function hardRefreshWithBadge() {
     // ignore
   }
 
-  // 3) Setear badge + notificación (idealmente deja el badge visible en el ícono)
-  await trySetIconBadge(1);
-  await tryShowLocalNotification();
+  // 3) No forzamos un badge por "forzar actualización" (evita falsos avisos)
+  // (los badges reales se calculan en base a Agenda/Comunicaciones)
 
   // 4) Recargar (con query versionada para cache-bust fuerte)
   try {
     const u = new URL(window.location.href);
-    u.searchParams.set("v", "0.24");
+    u.searchParams.set("v", "0.26");
     u.searchParams.set("ts", String(Date.now()));
     window.location.href = u.toString();
   } catch (_) {
@@ -178,6 +175,25 @@ export default function App() {
   const [commsMeta, setCommsMeta] = useState({ updatedAt: null, count: 0 });
   const [commsUnseen, setCommsUnseen] = useState(0);
   const [commsComposeOpen, setCommsComposeOpen] = useState(false);
+
+  // UX: overlay al forzar actualización (en algunos celulares tarda y parece que "no hizo nada")
+  const [refreshing, setRefreshing] = useState(false);
+
+  // Planilla de socios (admin)
+  const [planillaOpen, setPlanillaOpen] = useState(false);
+  const [sociosCsvText, setSociosCsvText] = useState("");
+  const planillaFileRef = useRef(null);
+
+  // Badge del ícono (si el navegador lo soporta): suma agenda hoy + comunicados no vistos
+  useEffect(() => {
+    const total = Math.min(99, (todayEventsCount || 0) + (commsUnseen || 0));
+    setBadgeCount(total);
+    if (total > 0) {
+      trySetIconBadge(total);
+    } else {
+      tryClearIconBadge();
+    }
+  }, [todayEventsCount, commsUnseen]);
 
   // Socios (directorio)
   const [socios, setSocios] = useState([]);
@@ -574,12 +590,17 @@ async function createEvent(payload) {
             const has = dayEvents.length > 0;
             const hasHigh = dayEvents.some((e) => e.highlight);
             const isSel = selectedDate === dIso;
+            const today0 = new Date();
+            today0.setHours(0, 0, 0, 0);
+            const dt0 = new Date(dt);
+            dt0.setHours(0, 0, 0, 0);
+            const isPast = dt0.getTime() < today0.getTime();
             return (
               <button
                 key={idx}
-                className={`calCell calDay ${has ? "calHas" : ""} ${hasHigh ? "calHigh" : ""} ${isSel ? "calSel" : ""}`}
+                className={`calCell calDay ${has ? (isPast ? "calHasPast" : "calHasFuture") : ""} ${hasHigh && !isPast ? "calHigh" : ""} ${isSel ? "calSel" : ""}`}
                 onClick={() => setSelectedDate(dIso)}
-                title={has ? "Hay evento(s)" : ""}
+                title={has ? (isPast ? "Evento(s) histórico(s)" : "Hay evento(s)") : ""}
               >
                 <span className="calNum">{dt.getDate()}</span>
                 {/* v0.11: sin puntito, se pinta la celda */}
@@ -946,7 +967,7 @@ async function createEvent(payload) {
     const j = await r.json().catch(() => ({}));
     if (!r.ok) throw new Error(j.error || j.message || `HTTP ${r.status}`);
     return j;
-  
+  }
 
   async function bulkUpsertSocios(items) {
     if (!canUseApi) throw new Error("Falta configurar VITE_API_BASE en el frontend.");
@@ -1095,7 +1116,35 @@ async function createEvent(payload) {
       setSociosCsvBusy(false);
     }
   }
-}
+
+  // Alternativa "sin archivo" (útil si iOS/PWA se pone quisquilloso): pegar CSV en texto
+  async function uploadSociosCsvText() {
+    if (!isAdmin) return alert("Acceso denegado (clave admin).");
+    const txt = String(sociosCsvText || "").trim();
+    if (!txt) return alert("Pegá el contenido CSV primero.");
+    setSociosCsvBusy(true);
+    try {
+      const parsed = parseCsv(txt);
+      const items = parsed?.rows || [];
+      const errors = parsed?.errors || [];
+      if (!items.length) throw new Error("No se encontraron filas válidas en el CSV.");
+      if (errors.length) {
+        const msg = errors.slice(0, 12).join("\n") + (errors.length > 12 ? `\n…y ${errors.length - 12} más.` : "");
+        throw new Error(`Hay categorías inválidas en el CSV:\n${msg}`);
+      }
+      await bulkUpsertSocios(items);
+      try {
+        await loadSocios({ page: 1, append: false, category: sociosCategory, q: sociosSearchQuery });
+      } catch (_) {}
+      alert(`OK. Se importaron ${items.length} socios.`);
+      setSociosCsvText("");
+      setPlanillaOpen(false);
+    } catch (e) {
+      alert(String(e?.message || e));
+    } finally {
+      setSociosCsvBusy(false);
+    }
+  }
 
   async function openSociosGrid() {
     setSociosGridError("");
@@ -2135,23 +2184,57 @@ async function submitSocioForm() {
               <div>Versión: {APP_VERSION}</div>
               <div>Build: {BUILD_STAMP || "(sin build stamp)"}</div>
               <div>CacheId: {PWA_CACHE_ID || "(s/d)"}</div>
+              <div>Commit: {BUILD_COMMIT || "(s/d)"}</div>
               <div>URL: {window.location.origin}</div>
               <div>API: {API_BASE || "(sin configurar)"}</div>
               <div>Estado API: {apiStatus?.ok ? "OK" : "NO OK"}</div>
               <div>API versión: {apiStatus?.apiVersion || "(s/d)"}</div>
               <div>API build: {apiStatus?.build || "(s/d)"}</div>
+              <div>API commit: {apiStatus?.commit || "(s/d)"}</div>
+              {apiStatus?.apiVersion && PWA_VERSION && apiStatus.apiVersion !== PWA_VERSION ? (
+                <div style={{ marginTop: 8, fontWeight: 700 }}>
+                  ⚠ Atención: la API está en v{apiStatus.apiVersion} y la app en v{PWA_VERSION}. Si algo falta, revisá que se haya deployado <i>API</i> y <i>Static Site</i>.
+                </div>
+              ) : null}
               <div style={{ marginTop: 10 }}>
                 <b>iPhone (PWA):</b> para “instalar” la app, abrí en Safari → Compartir → <i>Agregar a inicio</i>.
               </div>
               <div style={{ marginTop: 12 }}>
-                <button className="btnPrimary" onClick={hardRefreshWithBadge}>Forzar actualización</button>
+                <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
+                  <button className="btnPrimary" onClick={() => hardRefreshWithBadge(() => setRefreshing(true))}>Forzar actualización</button>
+                  <button
+                    className="btnSecondary"
+                    onClick={async () => {
+                      const diag = [
+                        `App: ${APP_VERSION}`,
+                        `PWA: ${PWA_VERSION}`,
+                        `Build: ${BUILD_STAMP || ""}`,
+                        `Commit: ${BUILD_COMMIT || ""}`,
+                        `CacheId: ${PWA_CACHE_ID || ""}`,
+                        `URL: ${window.location.href}`,
+                        `API: ${API_BASE || ""}`,
+                        `API ok: ${apiStatus?.ok ? "OK" : "NO OK"}`,
+                        `API version: ${apiStatus?.apiVersion || ""}`,
+                        `API build: ${apiStatus?.build || ""}`,
+                      ].join("\n");
+                      try {
+                        await navigator.clipboard.writeText(diag);
+                        alert("Diagnóstico copiado.");
+                      } catch (e) {
+                        window.prompt("Copiá este diagnóstico:", diag);
+                      }
+                    }}
+                  >
+                    Copiar diagnóstico
+                  </button>
+                </div>
                 <div className="muted" style={{ marginTop: 6, fontSize: 12 }}>
                   Si el celular no toma cambios, este botón intenta borrar cache y service worker y recargar.
                 </div>
               </div>
 
               <div style={{ marginTop: 18 }}>
-                <div style={{ fontWeight: 700, marginBottom: 6 }}>Administrador</div>
+                <div style={{ fontWeight: 700, marginBottom: 6 }}>Administrador – Adecuación de datos del socio</div>
 
                 {!isAdmin ? (
                   <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
@@ -2194,31 +2277,86 @@ async function submitSocioForm() {
 
                 <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>
                   La clave admin se guarda solo en este dispositivo. No se comparte con otros socios.
+                  <br />
+                  Desde aquí el administrador puede <b>descargar</b> y <b>cargar</b> la planilla de socios para actualizar datos.
                 </div>
               </div>
 
               {isAdmin && (
                 <div style={{ marginTop: 18 }}>
-                  <div style={{ fontWeight: 700, marginBottom: 6 }}>Socios (planilla)</div>
+                  <div style={{ fontWeight: 700, marginBottom: 6 }}>Planilla de Socios</div>
                   <div className="muted" style={{ fontSize: 12, marginBottom: 10 }}>
-                    Descargá la planilla (CSV), editá en Excel/Sheets y subila para actualizar la base.
+                    Descargá la planilla (CSV), editá en Excel/Sheets y luego importala para actualizar la base.
                   </div>
 
                   <div className="row" style={{ gap: 10, flexWrap: "wrap" }}>
                     <button className="btnGhost" disabled={sociosCsvBusy} onClick={downloadSociosCsv}>
                       {sociosCsvBusy ? "Procesando..." : "Descargar planilla (CSV)"}
                     </button>
-
-                    <input
-                      type="file"
-                      accept=".csv,text/csv"
-                      onChange={(e) => setSociosCsvFile(e.target.files?.[0] || null)}
-                      style={{ maxWidth: 260 }}
-                    />
-
-                    <button className="btnPrimary" disabled={sociosCsvBusy || !sociosCsvFile} onClick={uploadSociosCsv}>
-                      Subir planilla (CSV)
+                    <button className="btnPrimary" disabled={sociosCsvBusy} onClick={() => setPlanillaOpen(true)}>
+                      Importar planilla (CSV)
                     </button>
+                  </div>
+
+                  <div className="muted" style={{ fontSize: 12, marginTop: 8 }}>
+                    Valores válidos para <b>category</b>: <b>SERVICIOS</b> / <b>FABRICACION</b> / <b>LOGISTICA</b>.
+                  </div>
+                </div>
+              )}
+
+              {isAdmin && planillaOpen && (
+                <div className="overlay" onClick={() => !sociosCsvBusy && setPlanillaOpen(false)}>
+                  <div className="overlayCard" onClick={(e) => e.stopPropagation()} style={{ width: "min(560px, 92vw)" }}>
+                    <div style={{ fontWeight: 900, marginBottom: 6 }}>Importar planilla de socios</div>
+                    <div className="muted" style={{ fontSize: 12, marginBottom: 12 }}>
+                      Opción A: elegir un archivo CSV. Opción B: pegar el CSV como texto.
+                    </div>
+
+                    {/* Opción A: archivo */}
+                    <div className="row" style={{ gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+                      <input
+                        ref={planillaFileRef}
+                        type="file"
+                        accept=".csv,text/csv"
+                        onChange={(e) => setSociosCsvFile(e.target.files?.[0] || null)}
+                        style={{ display: "none" }}
+                      />
+                      <button
+                        className="btnSecondary"
+                        disabled={sociosCsvBusy}
+                        onClick={() => planillaFileRef.current?.click?.()}
+                      >
+                        Elegir archivo CSV
+                      </button>
+                      <span className="muted" style={{ fontSize: 12 }}>
+                        {sociosCsvFile ? sociosCsvFile.name : "(sin archivo seleccionado)"}
+                      </span>
+                      <button className="btnPrimary" disabled={sociosCsvBusy || !sociosCsvFile} onClick={uploadSociosCsv}>
+                        {sociosCsvBusy ? "Importando..." : "Subir CSV"}
+                      </button>
+                    </div>
+
+                    <div style={{ height: 10 }} />
+
+                    {/* Opción B: pegar */}
+                    <div className="muted" style={{ fontSize: 12, marginBottom: 6 }}>
+                      Pegado rápido (si no querés usar archivo):
+                    </div>
+                    <textarea
+                      className="input"
+                      value={sociosCsvText}
+                      onChange={(e) => setSociosCsvText(e.target.value)}
+                      placeholder={`member_no,company_name,category,expertise,website_url,social_url\n1,Ejemplo SA,SERVICIOS,Consultoría,https://...,https://...`}
+                      style={{ width: "100%", minHeight: 120, fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace" }}
+                    />
+                    <div className="row" style={{ gap: 10, justifyContent: "space-between", marginTop: 10, flexWrap: "wrap" }}>
+                      <button className="btnGhost" disabled={sociosCsvBusy} onClick={() => setPlanillaOpen(false)}>
+                        Cerrar
+                      </button>
+                      <button className="btnPrimary" disabled={sociosCsvBusy || !String(sociosCsvText || "").trim()} onClick={uploadSociosCsvText}>
+                        {sociosCsvBusy ? "Importando..." : "Importar CSV pegado"}
+                      </button>
+                    </div>
                   </div>
                 </div>
               )}
@@ -2226,6 +2364,17 @@ async function submitSocioForm() {
           </section>
         )}
       </main>
+
+      {refreshing && (
+        <div className="overlay">
+          <div className="overlayCard">
+            <div style={{ fontWeight: 800, marginBottom: 6 }}>Actualizando…</div>
+            <div className="muted" style={{ fontSize: 13 }}>
+              Esperá un momento hasta que se actualice el sistema.
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="appFooter">{APP_VERSION}</div>
 
