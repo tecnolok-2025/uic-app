@@ -184,6 +184,31 @@ const COMMS_KEEP = Math.min(Math.max(parseInt(process.env.COMMS_KEEP || "50", 10
 // Socios (directorio)
 const SOCIOS_KEEP = Math.min(Math.max(parseInt(process.env.SOCIOS_KEEP || "500", 10) || 500, 50), 5000);
 
+// Categorías válidas (internas) y etiquetas para planilla (human-friendly)
+const SOCIO_CATEGORIES = ["servicios", "fabricacion", "logistica"];
+const SOCIO_CATEGORY_LABEL = {
+  servicios: "SERVICIOS",
+  fabricacion: "FABRICACION",
+  logistica: "LOGISTICA",
+};
+
+function normalizeSocioCategoryInput(raw) {
+  // Acepta valores de planilla (SERVICIOS/FABRICACION/LOGISTICA) y variantes comunes.
+  const s0 = String(raw || "").trim();
+  if (!s0) return "";
+  const s = s0
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/\p{Diacritic}+/gu, "")
+    .replace(/\s+/g, " ");
+
+  if (["servicios", "servicio", "services"].includes(s)) return "servicios";
+  if (["fabricacion", "manufactura", "industria", "produccion", "manufacturing"].includes(s)) return "fabricacion";
+  if (["logistica", "loggistica", "transporte", "transportes", "logistics"].includes(s)) return "logistica";
+
+  return ""; // inválida
+}
+
 let dbReady = false;
 let pool = null;
 
@@ -1253,13 +1278,24 @@ app.get("/socios/export.csv", requireAdmin, async (req, res) => {
       items = (r.rows || []).map((x) => ({
         member_no: x.member_no,
         company_name: x.company_name,
-        category: x.category,
+        // Exportamos etiqueta clara para planilla (SERVICIOS/FABRICACION/LOGISTICA)
+        category: SOCIO_CATEGORY_LABEL[x.category] || SOCIO_CATEGORY_LABEL[normalizeSocioCategoryInput(x.category)] || "SERVICIOS",
         expertise: x.expertise || "",
         website_url: x.website_url || "",
         social_url: x.social_url || "",
       }));
     } else {
-      items = (SOCIOS_STORE.items || []).slice().sort((a, b) => (a.member_no || 0) - (b.member_no || 0));
+      items = (SOCIOS_STORE.items || [])
+        .slice()
+        .sort((a, b) => (a.member_no || 0) - (b.member_no || 0))
+        .map((x) => ({
+          member_no: x.member_no,
+          company_name: x.company_name,
+          category: SOCIO_CATEGORY_LABEL[normalizeSocioCategoryInput(x.category) || x.category] || "SERVICIOS",
+          expertise: x.expertise || "",
+          website_url: x.website_url || "",
+          social_url: x.social_url || "",
+        }));
     }
 
     const header = ["member_no", "company_name", "category", "expertise", "website_url", "social_url"].join(",");
@@ -1297,8 +1333,8 @@ app.post("/socios", requireAdmin, async (req, res) => {
   if (!Number.isFinite(memberNo) || memberNo <= 0) return res.status(400).json({ error: "memberNo inválido" });
   if (!companyName) return res.status(400).json({ error: "companyName requerido" });
 
-  const validCategories = new Set(["logistica", "fabricacion", "servicios"]);
-  const cat = validCategories.has(category) ? category : guessSocioCategory(companyName).category;
+  const catNorm = normalizeSocioCategoryInput(category);
+  const cat = catNorm || guessSocioCategory(companyName).category;
   const exp = expertise || guessSocioCategory(companyName).expertise || "";
 
   const id = `soc_${memberNo}_${Math.random().toString(36).slice(2, 8)}`;
@@ -1346,12 +1382,12 @@ app.post("/socios/bulk", requireAdmin, async (req, res) => {
     return res.status(400).json({ error: "items requerido (array)" });
   }
 
-  const validCategories = new Set(["logistica", "fabricacion", "servicios"]);
+  const validCategories = new Set(SOCIO_CATEGORIES);
   const items = rawItems
     .map((it) => {
       const memberNo = parseInt(pickBody(it, "memberNo", "member_no"), 10);
       const companyName = String(pickBody(it, "companyName", "company_name") || "").trim();
-      const category = String(pickBody(it, "category") || "").trim().toLowerCase();
+      const category = String(pickBody(it, "category") || "").trim();
       const expertise = String(pickBody(it, "expertise") || "").trim();
       const websiteUrl = normalizeUrl(pickBody(it, "websiteUrl", "website_url"));
       const socialUrl = normalizeUrl(pickBody(it, "socialUrl", "social_url"));
@@ -1360,7 +1396,7 @@ app.post("/socios/bulk", requireAdmin, async (req, res) => {
       if (!Number.isFinite(memberNo) || memberNo <= 0) return null;
       if (!companyName) return null;
 
-      const cat = validCategories.has(category) ? category : guessSocioCategory(companyName).category;
+      const cat = normalizeSocioCategoryInput(category) || guessSocioCategory(companyName).category;
       const exp = expertise || guessSocioCategory(companyName).expertise || "";
 
       return { id, memberNo, companyName, cat, exp, websiteUrl, socialUrl };
@@ -1447,12 +1483,12 @@ app.put("/socios/:id", requireAdmin, async (req, res) => {
 
   const memberNo = pickBody(req.body, 'memberNo', 'member_no') !== undefined ? parseInt(pickBody(req.body, 'memberNo', 'member_no'), 10) : null;
   const companyName = pickBody(req.body, 'companyName', 'company_name') !== undefined ? String(pickBody(req.body, 'companyName', 'company_name') || "").trim() : null;
-  const category = req.body?.category !== undefined ? String(req.body.category || "").trim().toLowerCase() : null;
+  const category = req.body?.category !== undefined ? String(req.body.category || "").trim() : null;
   const expertise = req.body?.expertise !== undefined ? String(req.body.expertise || "").trim() : null;
   const websiteUrl = pickBody(req.body, 'websiteUrl', 'website_url') !== undefined ? normalizeUrl(pickBody(req.body, 'websiteUrl', 'website_url')) : null;
   const socialUrl = pickBody(req.body, 'socialUrl', 'social_url') !== undefined ? normalizeUrl(pickBody(req.body, 'socialUrl', 'social_url')) : null;
 
-  const validCategories = new Set(["logistica", "fabricacion", "servicios"]);
+  const validCategories = new Set(SOCIO_CATEGORIES);
 
   // DB
   if (dbReady) {
@@ -1471,7 +1507,8 @@ app.put("/socios/:id", requireAdmin, async (req, res) => {
         vals.push(companyName);
       }
       if (category !== null) {
-        const c = validCategories.has(category) ? category : null;
+        const c0 = normalizeSocioCategoryInput(category);
+        const c = validCategories.has(c0) ? c0 : null;
         if (!c) return res.status(400).json({ error: "category inválida" });
         sets.push(`category = $${idx++}`);
         vals.push(c);
@@ -1518,8 +1555,9 @@ app.put("/socios/:id", requireAdmin, async (req, res) => {
     SOCIOS_STORE.items[idx].company_name = companyName;
   }
   if (category !== null) {
-    if (!validCategories.has(category)) return res.status(400).json({ error: "category inválida" });
-    SOCIOS_STORE.items[idx].category = category;
+    const c0 = normalizeSocioCategoryInput(category);
+    if (!validCategories.has(c0)) return res.status(400).json({ error: "category inválida" });
+    SOCIOS_STORE.items[idx].category = c0;
   }
   if (expertise !== null) SOCIOS_STORE.items[idx].expertise = expertise;
   if (websiteUrl !== null) SOCIOS_STORE.items[idx].website_url = websiteUrl;

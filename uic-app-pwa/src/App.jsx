@@ -2089,6 +2089,8 @@ async function submitSocioForm() {
                   <div style={{ fontWeight: 700, marginBottom: 6 }}>Socios (planilla)</div>
                   <div className="muted" style={{ fontSize: 12, marginBottom: 10 }}>
                     Descargá la planilla (CSV), editá en Excel/Sheets y subila para actualizar la base.
+                    <br />
+                    <b>Categoría (category)</b>: usar exactamente <b>SERVICIOS</b>, <b>FABRICACION</b> o <b>LOGISTICA</b> (sin tildes).
                   </div>
 
                   <div className="row" style={{ gap: 10, flexWrap: "wrap" }}>
