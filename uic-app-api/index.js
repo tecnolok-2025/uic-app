@@ -23,6 +23,11 @@ const __dirname = path.dirname(new URL(import.meta.url).pathname);
 
 /* ----------------------------- Config ---------------------------------- */
 
+// v0.24: versión visible para diagnóstico
+const API_VERSION = (process.env.API_VERSION || "0.24.0").trim();
+const API_BUILD_STAMP = (process.env.API_BUILD_STAMP || new Date().toISOString()).trim();
+
+
 const PORT = process.env.PORT || 10000;
 
 // CORS: Render Static Site -> Web Service
@@ -819,6 +824,7 @@ app.get("/", (req, res) => {
 });
 
 app.get("/health", (req, res) => res.json({ ok: true }));
+app.get("/version", (req, res) => res.json({ ok: true, apiVersion: API_VERSION, build: API_BUILD_STAMP }));
 
 /* ------------------------- WordPress (posts) ---------------------------- */
 

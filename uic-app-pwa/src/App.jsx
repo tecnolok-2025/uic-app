@@ -3,7 +3,9 @@ import "./index.css";
 import logoUIC from "./assets/logo-uic.jpeg";
 
 // Versión visible (footer / ajustes)
-const APP_VERSION = "UIC App v0.22";
+const APP_VERSION = "UIC App v0.24";
+const BUILD_STAMP = (typeof __UIC_BUILD_STAMP__ !== "undefined") ? __UIC_BUILD_STAMP__ : "";
+const PWA_CACHE_ID = (typeof __UIC_CACHE_ID__ !== "undefined") ? __UIC_CACHE_ID__ : "";
 
 const API_BASE = import.meta.env.VITE_API_BASE || ""; // ej: https://uic-campana-api.onrender.com
 
@@ -123,8 +125,15 @@ async function hardRefreshWithBadge() {
   await trySetIconBadge(1);
   await tryShowLocalNotification();
 
-  // 4) Recargar
-  window.location.reload();
+  // 4) Recargar (con query versionada para cache-bust fuerte)
+  try {
+    const u = new URL(window.location.href);
+    u.searchParams.set("v", "0.24");
+    u.searchParams.set("ts", String(Date.now()));
+    window.location.href = u.toString();
+  } catch (_) {
+    window.location.reload();
+  }
 }
 
 export default function App() {
@@ -301,7 +310,7 @@ useEffect(() => {
   useEffect(() => {
     (async () => {
       try {
-        const h = await apiGet("/health");
+        const h = await apiGet("/version").catch(() => apiGet("/health"));
         setApiStatus(h);
       } catch {
         setApiStatus({ ok: false });
@@ -2124,8 +2133,13 @@ async function submitSocioForm() {
             <div className="cardTitle">Ajustes</div>
             <div className="muted">
               <div>Versión: {APP_VERSION}</div>
+              <div>Build: {BUILD_STAMP || "(sin build stamp)"}</div>
+              <div>CacheId: {PWA_CACHE_ID || "(s/d)"}</div>
+              <div>URL: {window.location.origin}</div>
               <div>API: {API_BASE || "(sin configurar)"}</div>
               <div>Estado API: {apiStatus?.ok ? "OK" : "NO OK"}</div>
+              <div>API versión: {apiStatus?.apiVersion || "(s/d)"}</div>
+              <div>API build: {apiStatus?.build || "(s/d)"}</div>
               <div style={{ marginTop: 10 }}>
                 <b>iPhone (PWA):</b> para “instalar” la app, abrí en Safari → Compartir → <i>Agregar a inicio</i>.
               </div>
@@ -2133,6 +2147,53 @@ async function submitSocioForm() {
                 <button className="btnPrimary" onClick={hardRefreshWithBadge}>Forzar actualización</button>
                 <div className="muted" style={{ marginTop: 6, fontSize: 12 }}>
                   Si el celular no toma cambios, este botón intenta borrar cache y service worker y recargar.
+                </div>
+              </div>
+
+              <div style={{ marginTop: 18 }}>
+                <div style={{ fontWeight: 700, marginBottom: 6 }}>Administrador</div>
+
+                {!isAdmin ? (
+                  <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
+                    <input
+                      className="input"
+                      placeholder="Clave admin"
+                      value={adminDraft}
+                      onChange={(e) => setAdminDraft(e.target.value)}
+                      onKeyDown={(e) => e.stopPropagation()}
+                      style={{ maxWidth: 220 }}
+                    />
+                    <button
+                      className="btnSecondary"
+                      onClick={() => {
+                        const tok = (adminDraft || "").toString().trim();
+                        if (!tok) return alert("Ingresá la clave admin.");
+                        localStorage.setItem("uic_admin_token", tok);
+                        setAdminToken(tok);
+                        alert("Admin ACTIVO en este dispositivo.");
+                      }}
+                    >
+                      Guardar clave
+                    </button>
+                  </div>
+                ) : (
+                  <div className="row" style={{ gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                    <span className="pill pillActive">Admin: ACTIVO</span>
+                    <button
+                      className="btnSecondary"
+                      onClick={() => {
+                        localStorage.removeItem("uic_admin_token");
+                        setAdminToken("");
+                        alert("Admin desactivado en este dispositivo.");
+                      }}
+                    >
+                      Salir admin
+                    </button>
+                  </div>
+                )}
+
+                <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>
+                  La clave admin se guarda solo en este dispositivo. No se comparte con otros socios.
                 </div>
               </div>
 
