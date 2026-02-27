@@ -1010,21 +1010,29 @@ async function createEvent(payload) {
     const iSoc = idx("social_url");
 
     const rows = [];
+    const errors = [];
     for (let li = 1; li < lines.length; li++) {
       const cols = parseLine(lines[li]);
       const memberNo = parseInt(cols[iNo] || "", 10);
       const companyName = String(cols[iName] || "").trim();
       if (!Number.isFinite(memberNo) || memberNo <= 0 || !companyName) continue;
+      const rawCat = String(cols[iCat] || "").trim();
+      const cat = normalizeSocioCategory(rawCat);
+      if (!cat) {
+        errors.push(
+          `Línea ${li + 1}: category inválida "${rawCat}" (usar SERVICIOS / FABRICACION / LOGISTICA)`
+        );
+      }
       rows.push({
         member_no: memberNo,
         company_name: companyName,
-        category: String(cols[iCat] || "").trim().toLowerCase(),
+        category: cat || "fabricacion",
         expertise: String(cols[iExp] || "").trim(),
         website_url: normalizeUrl(cols[iWeb] || ""),
         social_url: normalizeUrl(cols[iSoc] || ""),
       });
     }
-    return rows;
+    return { rows, errors };
   }
 
   async function downloadSociosCsv() {
@@ -1057,8 +1065,14 @@ async function createEvent(payload) {
     setSociosCsvBusy(true);
     try {
       const txt = await sociosCsvFile.text();
-      const items = parseCsv(txt);
+      const parsed = parseCsv(txt);
+      const items = parsed?.rows || [];
+      const errors = parsed?.errors || [];
       if (!items.length) throw new Error("No se encontraron filas válidas en el CSV.");
+      if (errors.length) {
+        const msg = errors.slice(0, 12).join("\n") + (errors.length > 12 ? `\n…y ${errors.length - 12} más.` : "");
+        throw new Error(`Hay categorías inválidas en el CSV:\n${msg}`);
+      }
       await bulkUpsertSocios(items);
       // refrescar vista socios (si el usuario ya estaba ahí)
       try {
@@ -1098,6 +1112,29 @@ function prettySocioCategory(cat) {
   if (c === "logistica") return "Logística";
   if (c === "servicios") return "Servicios";
   return "Fabricación";
+}
+
+// Categorías permitidas para filtros y planilla
+const SOCIO_CATEGORIES = ["fabricacion", "logistica", "servicios"];
+
+function normalizeSocioCategory(raw) {
+  // Tolerante a tildes, mayúsculas y errores comunes (ej: "loggistica").
+  let s = String(raw || "").trim().toLowerCase();
+  try {
+    s = s.normalize("NFD").replace(/\p{Diacritic}/gu, "");
+  } catch (_) {
+    // navegadores viejos: continuar sin normalizar
+  }
+  s = s.replace(/\s+/g, " ");
+  if (s === "loggistica") s = "logistica";
+  if (s === "servicio") s = "servicios";
+  if (s === "manufactura" || s === "manufacturacion" || s === "fabrica") s = "fabricacion";
+  if (SOCIO_CATEGORIES.includes(s)) return s;
+  return "";
+}
+
+function isValidSocioCategory(raw) {
+  return SOCIO_CATEGORIES.includes(normalizeSocioCategory(raw));
 }
 
 function downloadJson(filename, obj) {
@@ -1983,18 +2020,26 @@ async function submitSocioForm() {
                         <td style={{ whiteSpace: "nowrap" }}><b>{s.member_no}</b></td>
                         <td style={{ minWidth: 220 }}>{s.company_name}</td>
                         <td>
-                          <select
-                            className="input"
-                            value={s.category || "fabricacion"}
-                            onChange={(e) => {
-                              const v = e.target.value;
-                              setSociosGridItems((prev) => prev.map((x) => (x.id === s.id ? { ...x, category: v } : x)));
-                            }}
-                          >
-                            <option value="fabricacion">Fabricación</option>
-                            <option value="logistica">Logística</option>
-                            <option value="servicios">Servicios</option>
-                          </select>
+                          {(() => {
+                            const catOk = isValidSocioCategory(s.category);
+                            const current = normalizeSocioCategory(s.category) || "";
+                            return (
+                              <select
+                                className={`input ${catOk ? "" : "inputError"}`}
+                                title={catOk ? "" : "Categoría inválida. Usar: Fabricación / Logística / Servicios"}
+                                value={current}
+                                onChange={(e) => {
+                                  const v = e.target.value;
+                                  setSociosGridItems((prev) => prev.map((x) => (x.id === s.id ? { ...x, category: v } : x)));
+                                }}
+                              >
+                                {!catOk ? <option value="">⚠ inválida</option> : null}
+                                <option value="fabricacion">Fabricación</option>
+                                <option value="logistica">Logística</option>
+                                <option value="servicios">Servicios</option>
+                              </select>
+                            );
+                          })()}
                         </td>
                         <td>
                           <input
@@ -2031,11 +2076,18 @@ async function submitSocioForm() {
                         </td>
                         <td style={{ whiteSpace: "nowrap" }}>
                           <button
-                            className="btnSmall"
+                            className={`btnSmall ${isValidSocioCategory(s.category) ? "" : "btnDisabled"}`}
+                            disabled={!isValidSocioCategory(s.category)}
+                            title={isValidSocioCategory(s.category) ? "" : "Corregí la categoría antes de guardar"}
                             onClick={async () => {
                               try {
+                                const cat = normalizeSocioCategory(s.category);
+                                if (!cat) {
+                                  alert("Categoría inválida. Usar: Fabricación / Logística / Servicios");
+                                  return;
+                                }
                                 const payload = {
-                                  category: String(s.category || "fabricacion"),
+                                  category: cat,
                                   expertise: String(s.expertise || "").trim(),
                                   website_url: normalizeUrl(s.website_url),
                                   social_url: normalizeUrl(s.social_url),
@@ -2089,8 +2141,6 @@ async function submitSocioForm() {
                   <div style={{ fontWeight: 700, marginBottom: 6 }}>Socios (planilla)</div>
                   <div className="muted" style={{ fontSize: 12, marginBottom: 10 }}>
                     Descargá la planilla (CSV), editá en Excel/Sheets y subila para actualizar la base.
-                    <br />
-                    <b>Categoría (category)</b>: usar exactamente <b>SERVICIOS</b>, <b>FABRICACION</b> o <b>LOGISTICA</b> (sin tildes).
                   </div>
 
                   <div className="row" style={{ gap: 10, flexWrap: "wrap" }}>

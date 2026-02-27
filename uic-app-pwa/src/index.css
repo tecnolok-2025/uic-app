@@ -560,3 +560,14 @@ a{color:inherit}
   background:rgba(10,18,28,0.98);
   z-index:1;
 }
+
+/* Validaciones (planilla/grilla de socios) */
+.inputError{
+  border: 2px solid rgba(255, 80, 80, 0.9) !important;
+  box-shadow: 0 0 0 2px rgba(255, 80, 80, 0.15);
+}
+
+.btnDisabled{
+  opacity: 0.55;
+  cursor: not-allowed;
+}
