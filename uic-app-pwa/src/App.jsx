@@ -185,6 +185,8 @@ export default function App() {
   // Grilla/tabla (admin) para correcciones masivas
   const [sociosGridOpen, setSociosGridOpen] = useState(false);
   const [sociosGridItems, setSociosGridItems] = useState([]);
+  const [sociosCsvFile, setSociosCsvFile] = useState(null);
+  const [sociosCsvBusy, setSociosCsvBusy] = useState(false);
   const [sociosGridLoading, setSociosGridLoading] = useState(false);
   const [sociosGridError, setSociosGridError] = useState("");
   const [sociosBulkOpen, setSociosBulkOpen] = useState(false);
@@ -952,6 +954,123 @@ async function createEvent(payload) {
     const j = await r.json().catch(() => ({}));
     if (!r.ok) throw new Error(j.error || j.message || `HTTP ${r.status}`);
     return j;
+  }
+
+  // CSV helpers (para editar planilla offline)
+  function parseCsv(text) {
+    const t = String(text || "").replace(/^\uFEFF/, ""); // strip BOM
+    const lines = t.split(/\r?\n/).filter((l) => l.trim().length);
+    if (!lines.length) return [];
+
+    // Detect delimiter: Excel (ES) suele usar ';'
+    const headerLine = lines[0];
+    const commaCount = (headerLine.match(/,/g) || []).length;
+    const semiCount = (headerLine.match(/;/g) || []).length;
+    const delim = semiCount > commaCount ? ";" : ",";
+
+    const parseLine = (line) => {
+      const out = [];
+      let cur = "";
+      let inQ = false;
+      for (let i = 0; i < line.length; i++) {
+        const ch = line[i];
+        if (inQ) {
+          if (ch === '"') {
+            if (line[i + 1] === '"') {
+              cur += '"';
+              i++;
+            } else {
+              inQ = false;
+            }
+          } else {
+            cur += ch;
+          }
+        } else {
+          if (ch === '"') inQ = true;
+          else if (ch === delim) {
+            out.push(cur);
+            cur = "";
+          } else {
+            cur += ch;
+          }
+        }
+      }
+      out.push(cur);
+      return out.map((x) => String(x ?? "").trim());
+    };
+
+    const headers = parseLine(lines[0]).map((h) => h.toLowerCase());
+    const idx = (name) => headers.indexOf(String(name).toLowerCase());
+
+    const iNo = idx("member_no");
+    const iName = idx("company_name");
+    const iCat = idx("category");
+    const iExp = idx("expertise");
+    const iWeb = idx("website_url");
+    const iSoc = idx("social_url");
+
+    const rows = [];
+    for (let li = 1; li < lines.length; li++) {
+      const cols = parseLine(lines[li]);
+      const memberNo = parseInt(cols[iNo] || "", 10);
+      const companyName = String(cols[iName] || "").trim();
+      if (!Number.isFinite(memberNo) || memberNo <= 0 || !companyName) continue;
+      rows.push({
+        member_no: memberNo,
+        company_name: companyName,
+        category: String(cols[iCat] || "").trim().toLowerCase(),
+        expertise: String(cols[iExp] || "").trim(),
+        website_url: normalizeUrl(cols[iWeb] || ""),
+        social_url: normalizeUrl(cols[iSoc] || ""),
+      });
+    }
+    return rows;
+  }
+
+  async function downloadSociosCsv() {
+    if (!isAdmin) return alert("Acceso denegado (clave admin).");
+    setSociosCsvBusy(true);
+    try {
+      const r = await fetch(`${API_BASE}/socios/export.csv`, {
+        headers: { "x-admin-token": adminToken },
+      });
+      if (!r.ok) throw new Error(`Error export (${r.status})`);
+      const blob = await r.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "uic_socios.csv";
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      alert(String(e?.message || e));
+    } finally {
+      setSociosCsvBusy(false);
+    }
+  }
+
+  async function uploadSociosCsv() {
+    if (!isAdmin) return alert("Acceso denegado (clave admin).");
+    if (!sociosCsvFile) return alert("Seleccioná un archivo CSV primero.");
+    setSociosCsvBusy(true);
+    try {
+      const txt = await sociosCsvFile.text();
+      const items = parseCsv(txt);
+      if (!items.length) throw new Error("No se encontraron filas válidas en el CSV.");
+      await bulkUpsertSocios(items);
+      // refrescar vista socios (si el usuario ya estaba ahí)
+      try {
+        await loadSocios({ page: 1, append: false, category: sociosCategory, q: sociosSearchQuery });
+      } catch (_) {}
+      alert(`OK. Se importaron ${items.length} socios.`);
+      setSociosCsvFile(null);
+    } catch (e) {
+      alert(String(e?.message || e));
+    } finally {
+      setSociosCsvBusy(false);
+    }
   }
 }
 
@@ -1964,6 +2083,32 @@ async function submitSocioForm() {
                   Si el celular no toma cambios, este botón intenta borrar cache y service worker y recargar.
                 </div>
               </div>
+
+              {isAdmin && (
+                <div style={{ marginTop: 18 }}>
+                  <div style={{ fontWeight: 700, marginBottom: 6 }}>Socios (planilla)</div>
+                  <div className="muted" style={{ fontSize: 12, marginBottom: 10 }}>
+                    Descargá la planilla (CSV), editá en Excel/Sheets y subila para actualizar la base.
+                  </div>
+
+                  <div className="row" style={{ gap: 10, flexWrap: "wrap" }}>
+                    <button className="btnGhost" disabled={sociosCsvBusy} onClick={downloadSociosCsv}>
+                      {sociosCsvBusy ? "Procesando..." : "Descargar planilla (CSV)"}
+                    </button>
+
+                    <input
+                      type="file"
+                      accept=".csv,text/csv"
+                      onChange={(e) => setSociosCsvFile(e.target.files?.[0] || null)}
+                      style={{ maxWidth: 260 }}
+                    />
+
+                    <button className="btnPrimary" disabled={sociosCsvBusy || !sociosCsvFile} onClick={uploadSociosCsv}>
+                      Subir planilla (CSV)
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           </section>
         )}

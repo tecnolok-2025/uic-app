@@ -1229,6 +1229,62 @@ app.get("/socios", async (req, res) => {
   return res.json({ page, per_page: perPage, total, has_more, next_page, items: paged });
 });
 
+// Export planilla (CSV) para edición offline (Excel/Google Sheets) y re-import vía /socios/bulk.
+// Requiere clave admin porque incluye URLs y expertise (aunque no incluye CUIT ni emails).
+app.get("/socios/export.csv", requireAdmin, async (req, res) => {
+  const esc = (v) => {
+    const s = String(v ?? "");
+    // CSV standard escaping
+    if (/[\n\r\",;]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
+    return s;
+  };
+
+  try {
+    let items = [];
+    if (dbReady) {
+      const r = await pool.query(
+        `SELECT member_no, company_name, category,
+                COALESCE(expertise,'') AS expertise,
+                COALESCE(website_url,'') AS website_url,
+                COALESCE(social_url,'') AS social_url
+         FROM uic_socios
+         ORDER BY member_no ASC`
+      );
+      items = (r.rows || []).map((x) => ({
+        member_no: x.member_no,
+        company_name: x.company_name,
+        category: x.category,
+        expertise: x.expertise || "",
+        website_url: x.website_url || "",
+        social_url: x.social_url || "",
+      }));
+    } else {
+      items = (SOCIOS_STORE.items || []).slice().sort((a, b) => (a.member_no || 0) - (b.member_no || 0));
+    }
+
+    const header = ["member_no", "company_name", "category", "expertise", "website_url", "social_url"].join(",");
+
+    const rows = items.map((it) =>
+      [
+        esc(it.member_no),
+        esc(it.company_name),
+        esc(it.category),
+        esc(it.expertise),
+        esc(it.website_url),
+        esc(it.social_url),
+      ].join(",")
+    );
+
+    const csv = [header, ...rows].join("\r\n");
+    res.setHeader("Content-Type", "text/csv; charset=utf-8");
+    res.setHeader("Content-Disposition", 'attachment; filename="uic_socios.csv"');
+    return res.send(csv);
+  } catch (e) {
+    console.log("⚠️ socios/export.csv error:", e?.message || e);
+    return res.status(500).json({ error: "export_failed" });
+  }
+});
+
 
 app.post("/socios", requireAdmin, async (req, res) => {
   const memberNo = parseInt(pickBody(req.body, 'memberNo', 'member_no'), 10);
