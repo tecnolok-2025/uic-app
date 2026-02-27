@@ -3,11 +3,10 @@ import "./index.css";
 import logoUIC from "./assets/logo-uic.jpeg";
 
 // Versión visible (footer / ajustes)
-const PWA_VERSION = (typeof __UIC_PWA_VERSION__ !== "undefined") ? __UIC_PWA_VERSION__ : "0.26.0";
-const APP_VERSION = `UIC App v`;
+const APP_VERSION = "UIC App v0.27";
 const BUILD_STAMP = (typeof __UIC_BUILD_STAMP__ !== "undefined") ? __UIC_BUILD_STAMP__ : "";
 const PWA_CACHE_ID = (typeof __UIC_CACHE_ID__ !== "undefined") ? __UIC_CACHE_ID__ : "";
-const BUILD_COMMIT = (typeof __UIC_COMMIT__ !== "undefined") ? __UIC_COMMIT__ : "";
+const PWA_COMMIT = (typeof __UIC_COMMIT__ !== "undefined") ? __UIC_COMMIT__ : "";
 
 const API_BASE = import.meta.env.VITE_API_BASE || ""; // ej: https://uic-campana-api.onrender.com
 
@@ -125,7 +124,7 @@ async function hardRefreshWithBadge(onStart) {
   // 4) Recargar (con query versionada para cache-bust fuerte)
   try {
     const u = new URL(window.location.href);
-    u.searchParams.set("v", "0.26");
+    u.searchParams.set("v", "0.27");
     u.searchParams.set("ts", String(Date.now()));
     window.location.href = u.toString();
   } catch (_) {
@@ -176,6 +175,29 @@ export default function App() {
   const [commsUnseen, setCommsUnseen] = useState(0);
   const [commsComposeOpen, setCommsComposeOpen] = useState(false);
 
+  // comunicación al administrador (canal 1:1 socio ↔ admin)
+  const MEMBER_TOKEN_KEY = "uic_member_token"; // sessionStorage (dura mientras no se cierre la app)
+  const MEMBER_NO_KEY = "uic_member_no";
+  const MEMBER_COMPANY_KEY = "uic_member_company";
+
+  const [memberToken, setMemberToken] = useState(() => (sessionStorage.getItem(MEMBER_TOKEN_KEY) || "").trim());
+  const [memberNo, setMemberNo] = useState(() => (sessionStorage.getItem(MEMBER_NO_KEY) || "").trim());
+  const [memberCompany, setMemberCompany] = useState(() => (sessionStorage.getItem(MEMBER_COMPANY_KEY) || "").trim());
+  const [memberLoginNo, setMemberLoginNo] = useState("");
+  const [memberLoginPass, setMemberLoginPass] = useState("");
+  const [memberLoginErr, setMemberLoginErr] = useState("");
+  const [memberMsgs, setMemberMsgs] = useState([]);
+  const [memberMsgDraft, setMemberMsgDraft] = useState("");
+
+  const [adminMsgThreads, setAdminMsgThreads] = useState([]);
+  const [adminThreadNo, setAdminThreadNo] = useState(null);
+  const [adminThreadTitle, setAdminThreadTitle] = useState("");
+  const [adminThreadMsgs, setAdminThreadMsgs] = useState([]);
+
+  const [msgsUnseen, setMsgsUnseen] = useState(0);
+  const [msgsBusy, setMsgsBusy] = useState(false);
+  const [msgsError, setMsgsError] = useState("");
+
   // UX: overlay al forzar actualización (en algunos celulares tarda y parece que "no hizo nada")
   const [refreshing, setRefreshing] = useState(false);
 
@@ -184,16 +206,38 @@ export default function App() {
   const [sociosCsvText, setSociosCsvText] = useState("");
   const planillaFileRef = useRef(null);
 
-  // Badge del ícono (si el navegador lo soporta): suma agenda hoy + comunicados no vistos
+  // Badge del ícono (si el navegador lo soporta): suma agenda hoy + comunicados no vistos + mensajes no leídos
   useEffect(() => {
-    const total = Math.min(99, (todayEventsCount || 0) + (commsUnseen || 0));
+    const total = Math.min(99, (todayEventsCount || 0) + (commsUnseen || 0) + (msgsUnseen || 0));
     setBadgeCount(total);
     if (total > 0) {
       trySetIconBadge(total);
     } else {
       tryClearIconBadge();
     }
-  }, [todayEventsCount, commsUnseen]);
+  }, [todayEventsCount, commsUnseen, msgsUnseen]);
+
+  // Refrescamos el conteo de mensajes no leídos cuando cambia el rol/token
+  useEffect(() => {
+    loadMessagesMeta();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [adminToken, memberToken]);
+
+  // Al entrar a la sección “comunicación al administrador”, cargamos lo necesario
+  useEffect(() => {
+    if (tab !== "mensajes") return;
+    setMsgsError("");
+    if (adminToken) {
+      loadAdminThreads();
+      return;
+    }
+    if (memberToken) {
+      loadMemberMessages();
+      return;
+    }
+    // sin sesión: queda el form de login
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tab]);
 
   // Socios (directorio)
   const [socios, setSocios] = useState([]);
@@ -448,7 +492,7 @@ useEffect(() => {
     { label: "Comunicación al socio", href: "#", onClick: () => { setTab("comunicacion"); } },
     { label: "Socios", href: "#", onClick: () => { setTab("socios"); } },
     { label: "Requerimientos Institucionales", href: "https://cpf-web.onrender.com/" },
-    { label: "Próximamente", href: "#", disabled: true },
+    { label: "comunicación al administrador", href: "#", onClick: () => { setTab("mensajes"); }, badge: (msgsUnseen || 0) },
     { label: "Sitio UIC", href: "https://uic-campana.com.ar" },
   ];
 
@@ -864,6 +908,182 @@ async function createEvent(payload) {
     await loadComms(10);
     setCommsUnseen(0);
     if (j.updatedAt) markCommsSeen(j.updatedAt);
+  }
+
+
+  /* ----------------------- comunicación al administrador ------------------------ */
+
+  async function loadMessagesMeta() {
+    try {
+      if (adminToken) {
+        const r = await fetch(`${API_BASE}/messages/meta`, { headers: { "x-admin-token": adminToken } });
+        const j = await r.json().catch(() => ({}));
+        if (r.ok) setMsgsUnseen(Number(j?.unread || 0));
+        return;
+      }
+      if (memberToken) {
+        const r = await fetch(`${API_BASE}/messages/meta`, { headers: { "x-member-token": memberToken } });
+        const j = await r.json().catch(() => ({}));
+        if (r.ok) setMsgsUnseen(Number(j?.unread || 0));
+        return;
+      }
+      setMsgsUnseen(0);
+    } catch {
+      // ignore
+    }
+  }
+
+  async function memberLogin() {
+    setMemberLoginErr("");
+    setMsgsError("");
+    const no = String(memberLoginNo || "").trim();
+    const pw = String(memberLoginPass || "");
+    if (!no || !pw) {
+      setMemberLoginErr("Completá Nº de socio y clave.");
+      return;
+    }
+    setMsgsBusy(true);
+    try {
+      const r = await fetch(`${API_BASE}/member/login`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ memberNo: no, password: pw }),
+      });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        setMemberLoginErr(j?.error || "No se pudo iniciar sesión.");
+        return;
+      }
+      const token = String(j?.token || "").trim();
+      const companyName = String(j?.companyName || "").trim();
+      if (!token) {
+        setMemberLoginErr("Respuesta inválida del servidor (sin token).");
+        return;
+      }
+      sessionStorage.setItem(MEMBER_TOKEN_KEY, token);
+      sessionStorage.setItem(MEMBER_NO_KEY, no);
+      sessionStorage.setItem(MEMBER_COMPANY_KEY, companyName);
+      setMemberToken(token);
+      setMemberNo(no);
+      setMemberCompany(companyName);
+      setMemberLoginPass("");
+      await loadMemberMessages(token);
+      await loadMessagesMeta();
+    } catch {
+      setMemberLoginErr("Error de red al iniciar sesión.");
+    } finally {
+      setMsgsBusy(false);
+    }
+  }
+
+  function memberLogout() {
+    sessionStorage.removeItem(MEMBER_TOKEN_KEY);
+    sessionStorage.removeItem(MEMBER_NO_KEY);
+    sessionStorage.removeItem(MEMBER_COMPANY_KEY);
+    setMemberToken("");
+    setMemberNo("");
+    setMemberCompany("");
+    setMemberMsgs([]);
+    setMsgsUnseen(0);
+  }
+
+  async function loadMemberMessages(tokenOverride) {
+    const token = tokenOverride || memberToken;
+    if (!token) return;
+    setMsgsBusy(true);
+    setMsgsError("");
+    try {
+      const r = await fetch(`${API_BASE}/member/messages`, { headers: { "x-member-token": token } });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        setMsgsError(j?.error || "No se pudieron cargar los mensajes.");
+        return;
+      }
+      setMemberMsgs(Array.isArray(j?.messages) ? j.messages : []);
+      await fetch(`${API_BASE}/member/messages/mark-read`, { method: "POST", headers: { "x-member-token": token } }).catch(() => {});
+    } catch {
+      setMsgsError("Error de red al cargar mensajes.");
+    } finally {
+      setMsgsBusy(false);
+    }
+  }
+
+  async function memberSendMessage() {
+    const token = memberToken;
+    const msg = String(memberMsgDraft || "").trim();
+    if (!token || !msg) return;
+    setMsgsBusy(true);
+    setMsgsError("");
+    try {
+      const r = await fetch(`${API_BASE}/member/messages`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-member-token": token },
+        body: JSON.stringify({ message: msg }),
+      });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        setMsgsError(j?.error || "No se pudo enviar el mensaje.");
+        return;
+      }
+      setMemberMsgDraft("");
+      await loadMemberMessages();
+      await loadMessagesMeta();
+    } catch {
+      setMsgsError("Error de red al enviar.");
+    } finally {
+      setMsgsBusy(false);
+    }
+  }
+
+  async function loadAdminThreads() {
+    if (!adminToken) return;
+    setMsgsBusy(true);
+    setMsgsError("");
+    try {
+      const r = await fetch(`${API_BASE}/admin/messages/threads`, { headers: { "x-admin-token": adminToken } });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        setMsgsError(j?.error || "No se pudieron cargar los hilos.");
+        return;
+      }
+      setAdminMsgThreads(Array.isArray(j?.threads) ? j.threads : []);
+      await loadMessagesMeta();
+    } catch {
+      setMsgsError("Error de red al cargar hilos.");
+    } finally {
+      setMsgsBusy(false);
+    }
+  }
+
+  async function openAdminThread(member_no, company_name) {
+    if (!adminToken) return;
+    const no = String(member_no);
+    setAdminThreadNo(no);
+    setAdminThreadTitle(String(company_name || "").trim());
+    setMsgsBusy(true);
+    setMsgsError("");
+    try {
+      const r = await fetch(`${API_BASE}/admin/messages/thread/${encodeURIComponent(no)}`, { headers: { "x-admin-token": adminToken } });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        setMsgsError(j?.error || "No se pudo abrir el hilo.");
+        return;
+      }
+      setAdminThreadMsgs(Array.isArray(j?.messages) ? j.messages : []);
+      await fetch(`${API_BASE}/admin/messages/thread/${encodeURIComponent(no)}/mark-read`, { method: "POST", headers: { "x-admin-token": adminToken } }).catch(() => {});
+      await loadMessagesMeta();
+      await loadAdminThreads();
+    } catch {
+      setMsgsError("Error de red al abrir el hilo.");
+    } finally {
+      setMsgsBusy(false);
+    }
+  }
+
+  function closeAdminThread() {
+    setAdminThreadNo(null);
+    setAdminThreadTitle("");
+    setAdminThreadMsgs([]);
   }
 
 
@@ -1295,9 +1515,12 @@ async function submitSocioForm() {
                     }}
                     target={x.href.startsWith("http") ? "_blank" : undefined}
                     rel={x.href.startsWith("http") ? "noreferrer" : undefined}
-                  >
-                    {x.label}
-                  </a>
+              >
+                <span>{x.label}</span>
+                {!x.disabled && Number(x.badge || 0) > 0 ? (
+                  <span className="quickBadge">{Math.min(99, Number(x.badge || 0))}</span>
+                ) : null}
+              </a>
                 ))}
               </div>
             </section>
@@ -1715,6 +1938,184 @@ async function submitSocioForm() {
             </div>
           </section>
         )}
+
+
+		{tab === "mensajes" && (
+		  <section className="card">
+		    <div className="rowBetween" style={{ gap: 10, alignItems: "flex-start" }}>
+		      <div>
+		        <div className="cardTitle">comunicación al administrador</div>
+		        <div className="cardSub">
+		          Canal directo socio ↔ UIC. El socio ve solo sus mensajes; el administrador ve todos los hilos.
+		        </div>
+		      </div>
+		      <div className="row" style={{ gap: 8, alignItems: "center", flexWrap: "wrap", justifyContent: "flex-end" }}>
+		        {adminToken ? (
+		          <span className="pill">Modo administrador</span>
+		        ) : memberToken ? (
+		          <span className="pill">Sesión socio #{memberNo || ""}</span>
+		        ) : (
+		          <span className="pill">Acceso de socio</span>
+		        )}
+		        <button
+		          className="btnSecondary"
+		          onClick={() => {
+		            if (adminToken) return loadAdminThreads();
+		            if (memberToken) return loadMemberMessages();
+		          }}
+		        >
+		          Actualizar
+		        </button>
+		        {memberToken && !adminToken && (
+		          <button className="btnSecondary" onClick={memberLogout}>
+		            Cerrar sesión
+		          </button>
+		        )}
+		      </div>
+		    </div>
+
+		    {msgsBusy && <div className="muted" style={{ marginTop: 8 }}>Cargando…</div>}
+		    {msgsError ? (
+		      <div className="alert" style={{ marginTop: 10 }}>
+		        {msgsError}
+		      </div>
+		    ) : null}
+
+		    {/* Admin */}
+		    {adminToken ? (
+		      <div style={{ marginTop: 12 }}>
+		        {adminThreadNo ? (
+		          <>
+		            <div className="rowBetween" style={{ gap: 8, alignItems: "center" }}>
+		              <div>
+		                <div style={{ fontWeight: 800 }}>{adminThreadTitle || "Socio"} <span className="muted">(#{adminThreadNo})</span></div>
+		                <div className="muted" style={{ fontSize: 12 }}>Solo lectura (por ahora). El socio sí puede enviar.</div>
+		              </div>
+		              <button className="btnSecondary" onClick={closeAdminThread}>Volver</button>
+		            </div>
+
+		            <div className="messagesWrap">
+		              {(adminThreadMsgs || []).length === 0 ? (
+		                <div className="muted">No hay mensajes en este hilo.</div>
+		              ) : (
+		                adminThreadMsgs.map((m) => {
+		                  const mine = (m.direction === "outbound");
+		                  return (
+		                    <div key={m.id || m.created_at} className={`msgRow ${mine ? "msgMe" : "msgOther"}`}>
+		                      <div className="msgBubble">
+		                        <div style={{ whiteSpace: "pre-wrap" }}>{m.body}</div>
+		                        <div className="msgMeta">{formatDateTime(m.created_at)}</div>
+		                      </div>
+		                    </div>
+		                  );
+		                })
+		              )}
+		            </div>
+		          </>
+		        ) : (
+		          <>
+		            <div className="muted" style={{ marginBottom: 8 }}>
+		              Hilos activos (tocá para abrir). Los contadores muestran mensajes del socio pendientes de lectura.
+		            </div>
+		            {(adminMsgThreads || []).length === 0 ? (
+		              <div className="muted">No hay mensajes aún.</div>
+		            ) : (
+		              <div className="threadsList">
+		                {adminMsgThreads.map((t) => (
+		                  <button
+		                    key={t.member_no}
+		                    className="threadItem"
+		                    onClick={() => openAdminThread(t.member_no, t.company_name)}
+		                  >
+		                    <div style={{ textAlign: "left" }}>
+		                      <div style={{ fontWeight: 800 }}>{t.company_name || "Socio"} <span className="muted">(#{t.member_no})</span></div>
+		                      <div className="muted" style={{ fontSize: 12, marginTop: 2 }}>
+		                        {t.last_message ? String(t.last_message).slice(0, 90) : "(sin mensaje)"}
+		                      </div>
+		                      <div className="muted" style={{ fontSize: 11, marginTop: 4 }}>{t.last_at ? formatDateTime(t.last_at) : ""}</div>
+		                    </div>
+		                    {Number(t.unread_for_admin || 0) > 0 ? (
+		                      <span className="navBadgeNum">{Math.min(99, Number(t.unread_for_admin || 0))}</span>
+		                    ) : null}
+		                  </button>
+		                ))}
+		              </div>
+		            )}
+		          </>
+		        )}
+		      </div>
+		    ) : (
+		      /* Socio */
+		      <div style={{ marginTop: 12 }}>
+		        {!memberToken ? (
+		          <div className="cardSub" style={{ marginTop: 8 }}>
+		            <div className="muted" style={{ marginBottom: 8 }}>
+		              Ingresá con tu Nº de socio y clave. Si ya iniciaste sesión antes, no hace falta volver a hacerlo mientras no cierres la app.
+		            </div>
+		            <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
+		              <input
+		                className="input"
+		                placeholder="Nº de socio"
+		                value={memberLoginNo}
+		                onChange={(e) => setMemberLoginNo(e.target.value)}
+		                style={{ width: 160 }}
+		              />
+		              <input
+		                className="input"
+		                placeholder="Clave"
+		                type="password"
+		                value={memberLoginPass}
+		                onChange={(e) => setMemberLoginPass(e.target.value)}
+		                style={{ width: 200 }}
+		              />
+		              <button className="btnPrimary" onClick={memberLogin}>
+		                Ingresar
+		              </button>
+		            </div>
+		            {memberLoginErr ? <div className="alert" style={{ marginTop: 10 }}>{memberLoginErr}</div> : null}
+		          </div>
+		        ) : (
+		          <>
+		            <div className="muted" style={{ marginBottom: 8 }}>
+		              {memberCompany ? <b>{memberCompany}</b> : "Tu empresa"} — canal directo con UIC.
+		            </div>
+		            <div className="messagesWrap">
+		              {(memberMsgs || []).length === 0 ? (
+		                <div className="muted">Todavía no hay mensajes.</div>
+		              ) : (
+		                memberMsgs.map((m) => {
+		                  const mine = (m.direction === "inbound");
+		                  return (
+		                    <div key={m.id || m.created_at} className={`msgRow ${mine ? "msgMe" : "msgOther"}`}>
+		                      <div className="msgBubble">
+		                        <div style={{ whiteSpace: "pre-wrap" }}>{m.body}</div>
+		                        <div className="msgMeta">{formatDateTime(m.created_at)}</div>
+		                      </div>
+		                    </div>
+		                  );
+		                })
+		              )}
+		            </div>
+
+		            <div className="row" style={{ gap: 8, marginTop: 12, flexWrap: "wrap" }}>
+		              <textarea
+		                className="input"
+		                placeholder="Escribí tu mensaje…"
+		                value={memberMsgDraft}
+		                onChange={(e) => setMemberMsgDraft(e.target.value)}
+		                rows={3}
+		                style={{ minWidth: 260, flex: 1 }}
+		              />
+		              <button className="btnPrimary" onClick={memberSendMessage} disabled={!String(memberMsgDraft || "").trim()}>
+		                Enviar
+		              </button>
+		            </div>
+		          </>
+		        )}
+		      </div>
+		    )}
+		  </section>
+		)}
 
         
 {tab === "socios" && (
@@ -2184,50 +2585,16 @@ async function submitSocioForm() {
               <div>Versión: {APP_VERSION}</div>
               <div>Build: {BUILD_STAMP || "(sin build stamp)"}</div>
               <div>CacheId: {PWA_CACHE_ID || "(s/d)"}</div>
-              <div>Commit: {BUILD_COMMIT || "(s/d)"}</div>
               <div>URL: {window.location.origin}</div>
               <div>API: {API_BASE || "(sin configurar)"}</div>
               <div>Estado API: {apiStatus?.ok ? "OK" : "NO OK"}</div>
               <div>API versión: {apiStatus?.apiVersion || "(s/d)"}</div>
               <div>API build: {apiStatus?.build || "(s/d)"}</div>
-              <div>API commit: {apiStatus?.commit || "(s/d)"}</div>
-              {apiStatus?.apiVersion && PWA_VERSION && apiStatus.apiVersion !== PWA_VERSION ? (
-                <div style={{ marginTop: 8, fontWeight: 700 }}>
-                  ⚠ Atención: la API está en v{apiStatus.apiVersion} y la app en v{PWA_VERSION}. Si algo falta, revisá que se haya deployado <i>API</i> y <i>Static Site</i>.
-                </div>
-              ) : null}
               <div style={{ marginTop: 10 }}>
                 <b>iPhone (PWA):</b> para “instalar” la app, abrí en Safari → Compartir → <i>Agregar a inicio</i>.
               </div>
               <div style={{ marginTop: 12 }}>
-                <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
-                  <button className="btnPrimary" onClick={() => hardRefreshWithBadge(() => setRefreshing(true))}>Forzar actualización</button>
-                  <button
-                    className="btnSecondary"
-                    onClick={async () => {
-                      const diag = [
-                        `App: ${APP_VERSION}`,
-                        `PWA: ${PWA_VERSION}`,
-                        `Build: ${BUILD_STAMP || ""}`,
-                        `Commit: ${BUILD_COMMIT || ""}`,
-                        `CacheId: ${PWA_CACHE_ID || ""}`,
-                        `URL: ${window.location.href}`,
-                        `API: ${API_BASE || ""}`,
-                        `API ok: ${apiStatus?.ok ? "OK" : "NO OK"}`,
-                        `API version: ${apiStatus?.apiVersion || ""}`,
-                        `API build: ${apiStatus?.build || ""}`,
-                      ].join("\n");
-                      try {
-                        await navigator.clipboard.writeText(diag);
-                        alert("Diagnóstico copiado.");
-                      } catch (e) {
-                        window.prompt("Copiá este diagnóstico:", diag);
-                      }
-                    }}
-                  >
-                    Copiar diagnóstico
-                  </button>
-                </div>
+                <button className="btnPrimary" onClick={() => hardRefreshWithBadge(() => setRefreshing(true))}>Forzar actualización</button>
                 <div className="muted" style={{ marginTop: 6, fontSize: 12 }}>
                   Si el celular no toma cambios, este botón intenta borrar cache y service worker y recargar.
                 </div>

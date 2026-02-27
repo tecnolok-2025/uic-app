@@ -25,9 +25,8 @@ const __dirname = path.dirname(new URL(import.meta.url).pathname);
 /* ----------------------------- Config ---------------------------------- */
 
 // v0.24: versión visible para diagnóstico
-const API_VERSION = (process.env.API_VERSION || "0.26.0").trim();
+const API_VERSION = (process.env.API_VERSION || "0.25.0").trim();
 const API_BUILD_STAMP = (process.env.API_BUILD_STAMP || new Date().toISOString()).trim();
-const API_COMMIT = (process.env.RENDER_GIT_COMMIT || process.env.GITHUB_SHA || process.env.GIT_COMMIT || "").slice(0, 7);
 
 
 const PORT = process.env.PORT || 10000;
@@ -973,7 +972,7 @@ app.get("/", (req, res) => {
 });
 
 app.get("/health", (req, res) => res.json({ ok: true }));
-app.get("/version", (req, res) => res.json({ ok: true, apiVersion: API_VERSION, build: API_BUILD_STAMP, commit: API_COMMIT || "" }));
+app.get("/version", (req, res) => res.json({ ok: true, apiVersion: API_VERSION, build: API_BUILD_STAMP }));
 
 /* ------------------------- WordPress (posts) ---------------------------- */
 
@@ -1954,25 +1953,8 @@ app.post("/admin/messages/thread/:memberNo/mark-read", requireAdmin, async (req,
 });
 
 app.post("/admin/messages/thread/:memberNo/reply", requireAdmin, async (req, res) => {
-  try {
-    const memberNo = parseInt(req.params.memberNo, 10);
-    const message = String(req.body?.message || "").trim();
-    if (!memberNo) return res.status(400).json({ error: "memberNo inválido" });
-    if (!message) return res.status(400).json({ error: "message requerido" });
-
-    const id = "m_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 8);
-
-    if (dbReady) {
-      await pool.query(
-        "INSERT INTO uic_messages(id, thread_member_no, from_role, message, read_by_admin, read_by_member) VALUES ($1,$2,'admin',$3,TRUE,FALSE)",
-        [id, memberNo, message]
-      );
-    }
-    return res.json({ ok: true, id });
-  } catch (e) {
-    console.log("⚠️ admin/messages/reply error:", e?.message || e);
-    return res.status(500).json({ error: "Error interno" });
-  }
+  // Solo lectura: el administrador NO responde desde la app.
+  return res.status(403).json({ error: "Solo lectura: el administrador no responde desde la app" });
 });
 
 // Thread messages (member)
