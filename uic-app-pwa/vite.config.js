@@ -2,8 +2,8 @@ import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import { VitePWA } from "vite-plugin-pwa";
 
-// v0.27: cache-bust fuerte para iOS/Android + build stamp visible.
-const CACHE_ID = "uic-campana-v027";
+// v0.28.2: cache-bust fuerte para iOS/Android + build stamp visible.
+const CACHE_ID = "uic-campana-v0282";
 // Render suele exponer el commit como RENDER_GIT_COMMIT. Si no existe, dejamos vacío.
 const COMMIT = process.env.RENDER_GIT_COMMIT || process.env.GITHUB_SHA || process.env.COMMIT_SHA || "";
 
@@ -32,8 +32,8 @@ export default defineConfig({
         background_color: "#0b2a4a",
         display: "standalone",
         // start_url versionado para que iOS trate la instalación como nueva
-        id: "/?v=0.27",
-        start_url: "/?v=0.27",
+        id: "/?v=0.28.2",
+        start_url: "/?v=0.28.2",
         scope: "/",
         icons: [
           { src: "/icons/icon-192.png", sizes: "192x192", type: "image/png" },

@@ -810,6 +810,35 @@ function isWithinWindow(dateStr) {
 /* ----------------------------- App ------------------------------------- */
 
 const app = express();
+
+app.set("trust proxy", 1);
+
+// --- Hardening: simple in-memory rate-limit (per IP) ---
+// Render instances are ephemeral; this is best-effort to reduce brute-force and accidental floods.
+const __rl = new Map();
+function __rateLimited(req, res, keyPrefix, limit, windowMs) {
+  try {
+    const ip = (req.headers["x-forwarded-for"] || req.ip || "unknown").toString().split(",")[0].trim();
+    const key = `${keyPrefix}:${ip}`;
+    const now = Date.now();
+    const cur = __rl.get(key) || { count: 0, resetAt: now + windowMs };
+    if (now > cur.resetAt) {
+      cur.count = 0;
+      cur.resetAt = now + windowMs;
+    }
+    cur.count += 1;
+    __rl.set(key, cur);
+    if (cur.count > limit) {
+      const retrySec = Math.max(1, Math.ceil((cur.resetAt - now) / 1000));
+      res.status(429).json({ ok: false, error: "Demasiados intentos. Probá de nuevo en unos minutos.", retry_after_sec: retrySec });
+      return true;
+    }
+    return false;
+  } catch {
+    // si falla por algún motivo, no bloqueamos
+    return false;
+  }
+}
 app.use(express.json());
 
 // CORS
@@ -1763,6 +1792,7 @@ return res.json({ ok: true, member_no: memberNo, company_name: socio.company_nam
 
 app.post("/member/login", async (req, res) => {
   try {
+    if (__rateLimited(req, res, "member-login", 30, 10 * 60 * 1000)) return;
     const memberNo = parseInt(req.body?.member_no ?? req.body?.memberNo, 10);
     const passwordRaw = String(req.body?.password || "");
     if (!memberNo) return res.status(400).json({ error: "member_no requerido" });
@@ -1823,6 +1853,7 @@ app.post("/member/change-password", requireMember, async (req, res) => {
 
 app.post("/member/reset-password", async (req, res) => {
   try {
+    if (__rateLimited(req, res, "member-reset", 10, 10 * 60 * 1000)) return;
     const memberNo = parseInt(req.body?.member_no ?? req.body?.memberNo, 10);
     if (!memberNo) return res.status(400).json({ error: "member_no requerido" });
 
@@ -1892,16 +1923,16 @@ app.get("/admin/messages/threads", requireAdmin, async (req, res) => {
   try {
     if (dbReady) {
       const r = await pool.query(`
-        SELECT 
-          s.member_no,
-          s.company_name,
+        SELECT
+          m.thread_member_no AS member_no,
+          COALESCE(s.company_name, CONCAT('Socio ', m.thread_member_no)) AS company_name,
           MAX(m.created_at) AS last_at,
-          (SELECT message FROM uic_messages mm WHERE mm.thread_member_no=s.member_no ORDER BY mm.created_at DESC LIMIT 1) AS last_message,
-          (SELECT COUNT(*)::int FROM uic_messages mu WHERE mu.thread_member_no=s.member_no AND mu.from_role='member' AND mu.read_by_admin=FALSE) AS unread_for_admin
-        FROM uic_socios s
-        LEFT JOIN uic_messages m ON m.thread_member_no = s.member_no
-        GROUP BY s.member_no, s.company_name
-        ORDER BY last_at DESC NULLS LAST, s.company_name ASC
+          (SELECT message FROM uic_messages mm WHERE mm.thread_member_no=m.thread_member_no ORDER BY mm.created_at DESC LIMIT 1) AS last_message,
+          (SELECT COUNT(*)::int FROM uic_messages mu WHERE mu.thread_member_no=m.thread_member_no AND mu.from_role='member' AND mu.read_by_admin=FALSE) AS unread_for_admin
+        FROM uic_messages m
+        LEFT JOIN uic_socios s ON s.member_no = m.thread_member_no
+        GROUP BY m.thread_member_no, s.company_name
+        ORDER BY last_at DESC NULLS LAST, company_name ASC
         LIMIT 500
       `);
 
@@ -1999,6 +2030,7 @@ app.get("/member/messages", requireMember, async (req, res) => {
 
 app.post("/member/messages", requireMember, async (req, res) => {
   try {
+    if (__rateLimited(req, res, "member-msg-post", 60, 10 * 60 * 1000)) return;
     const memberNo = req.member.memberNo;
     const message = String(req.body?.message || "").trim();
     if (!message) return res.status(400).json({ error: "message requerido" });

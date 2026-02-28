@@ -3,7 +3,7 @@ import "./index.css";
 import logoUIC from "./assets/logo-uic.jpeg";
 
 // Versión visible (footer / ajustes)
-const APP_VERSION = "UIC App v0.28.1";
+const APP_VERSION = "UIC App v0.28.2";
 const BUILD_STAMP = (typeof __UIC_BUILD_STAMP__ !== "undefined") ? __UIC_BUILD_STAMP__ : "";
 const PWA_CACHE_ID = (typeof __UIC_CACHE_ID__ !== "undefined") ? __UIC_CACHE_ID__ : "";
 const PWA_COMMIT = (typeof __UIC_COMMIT__ !== "undefined") ? __UIC_COMMIT__ : "";
@@ -124,7 +124,7 @@ async function hardRefreshWithBadge(onStart) {
   // 4) Recargar (con query versionada para cache-bust fuerte)
   try {
     const u = new URL(window.location.href);
-    u.searchParams.set("v", "0.28");
+    u.searchParams.set("v", "0.28.2");
     u.searchParams.set("ts", String(Date.now()));
     window.location.href = u.toString();
   } catch (_) {
@@ -1138,6 +1138,18 @@ if (!token) {
     const token = memberToken;
     const msg = String(memberMsgDraft || "").trim();
     if (!token || !msg) return;
+
+    // Optimista: mostramos el mensaje al instante (y después sincronizamos con la API).
+    const optimisticId = `tmp-${Date.now()}`;
+    const optimistic = {
+      id: optimisticId,
+      from: "member",
+      body: msg,
+      createdAt: new Date().toISOString(),
+      readByAdmin: false,
+    };
+    setMemberMsgs((prev) => [optimistic, ...(prev || [])]);
+
     setMsgsBusy(true);
     setMsgsError("");
     try {
@@ -1148,6 +1160,8 @@ if (!token) {
       });
       const j = await r.json().catch(() => ({}));
       if (!r.ok) {
+        // revertimos optimista si falló
+        setMemberMsgs((prev) => (prev || []).filter((x) => x?.id !== optimisticId));
         setMsgsError(j?.error || "No se pudo enviar el mensaje.");
         return;
       }
@@ -1155,463 +1169,12 @@ if (!token) {
       await loadMemberMessages();
       await loadMessagesMeta();
     } catch {
+      setMemberMsgs((prev) => (prev || []).filter((x) => x?.id !== optimisticId));
       setMsgsError("Error de red al enviar.");
     } finally {
       setMsgsBusy(false);
     }
   }
-
-  async function memberResetPassword() {
-    setMemberResetMsg("");
-    setMemberResetErr("");
-    const raw = String(memberLoginNo || "").trim();
-    const n = parseInt(raw, 10);
-    if (!n) {
-      setMemberResetErr("Ingresá un Nº de socio válido.");
-      return;
-    }
-    const ok = window.confirm("Esto restablece tu clave inicial. ¿Continuar?");
-    if (!ok) return;
-    setMsgsBusy(true);
-    try {
-      const r = await fetch(`${API_BASE}/member/reset-password`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ memberNo: n }),
-      });
-      const j = await r.json().catch(() => ({}));
-      if (!r.ok) {
-        setMemberResetErr(j?.error || "No se pudo restablecer.");
-        return;
-      }setMemberResetMsg("Clave restablecida. Usá tu clave inicial informada por UIC o contactate con administración.");
-      } catch {
-      setMemberResetErr("Error de red al restablecer.");
-    } finally {
-      setMsgsBusy(false);
-    }
-  }
-
-  async function memberChangePassword() {
-    setMemberPwMsg("");
-    setMemberPwErr("");
-    const token = memberToken;
-    if (!token) {
-      setMemberPwErr("Primero iniciá sesión como socio.");
-      return;
-    }
-    const oldPw = String(memberPwOld || "");
-    const newPw = String(memberPwNew || "");
-    const newPw2 = String(memberPwNew2 || "");
-    if (!oldPw || !newPw || !newPw2) {
-      setMemberPwErr("Completá clave actual, nueva clave y confirmación.");
-      return;
-    }
-    if (newPw !== newPw2) {
-      setMemberPwErr("La nueva clave y su confirmación no coinciden.");
-      return;
-    }
-    if (newPw.length < 6) {
-      setMemberPwErr("La nueva clave debe tener al menos 6 caracteres.");
-      return;
-    }
-    setMsgsBusy(true);
-    try {
-      const r = await fetch(`${API_BASE}/member/change-password`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "x-member-token": token },
-        body: JSON.stringify({ oldPassword: oldPw, newPassword: newPw }),
-      });
-      const j = await r.json().catch(() => ({}));
-      if (!r.ok) {
-        setMemberPwErr(j?.error || "No se pudo cambiar la clave.");
-        return;
-      }
-      setMemberPwMsg("Clave cambiada correctamente.");
-      setMemberPwErr("");
-      setMemberUsingDefault(false);
-      setMemberPwOpen(false);
-      setMemberPwOld("");
-      setMemberPwNew("");
-      setMemberPwNew2("");
-    } catch {
-      setMemberPwErr("Error de red al cambiar clave.");
-    } finally {
-      setMsgsBusy(false);
-    }
-  }
-
-  async function loadAdminThreads() {
-    if (!adminToken) return;
-    setMsgsBusy(true);
-    setMsgsError("");
-    try {
-      const r = await fetch(`${API_BASE}/admin/messages/threads`, { headers: { "x-admin-token": adminToken } });
-      const j = await r.json().catch(() => ({}));
-      if (!r.ok) {
-        setMsgsError(j?.error || "No se pudieron cargar los hilos.");
-        return;
-      }
-      setAdminMsgThreads(Array.isArray(j?.threads) ? j.threads : (Array.isArray(j?.items) ? j.items : []));
-      await loadMessagesMeta();
-    } catch {
-      setMsgsError("Error de red al cargar hilos.");
-    } finally {
-      setMsgsBusy(false);
-    }
-  }
-
-  async function openAdminThread(member_no, company_name) {
-    if (!adminToken) return;
-    const no = String(member_no);
-    setAdminThreadNo(no);
-    setAdminThreadTitle(String(company_name || "").trim());
-    setMsgsBusy(true);
-    setMsgsError("");
-    try {
-      const r = await fetch(`${API_BASE}/admin/messages/thread/${encodeURIComponent(no)}`, { headers: { "x-admin-token": adminToken } });
-      const j = await r.json().catch(() => ({}));
-      if (!r.ok) {
-        setMsgsError(j?.error || "No se pudo abrir el hilo.");
-        return;
-      }
-      setAdminThreadMsgs(normalizeMsgs(j?.messages || j?.items));
-      await fetch(`${API_BASE}/admin/messages/thread/${encodeURIComponent(no)}/mark-read`, { method: "POST", headers: { "x-admin-token": adminToken } }).catch(() => {});
-      await loadMessagesMeta();
-      await loadAdminThreads();
-    } catch {
-      setMsgsError("Error de red al abrir el hilo.");
-    } finally {
-      setMsgsBusy(false);
-    }
-  }
-
-  function closeAdminThread() {
-    setAdminThreadNo(null);
-    setAdminThreadTitle("");
-    setAdminThreadMsgs([]);
-  }
-
-
-  /* ----------------------------- Socios -------------------------------- */
-
-  async function loadSocios(opts = {}) {
-    const { page = 1, perPage = 25, append = false, category = sociosCategory, q = sociosSearchQuery } = opts;
-
-    if (!canUseApi) {
-      setSociosError("Falta configurar VITE_API_BASE en el frontend.");
-      return;
-    }
-
-    setSociosLoading(true);
-    setSociosError("");
-    try {
-      const qs = new URLSearchParams();
-      qs.set("page", String(page));
-      qs.set("per_page", String(perPage));
-      if (category && category !== "todos") qs.set("category", category);
-      if (q) qs.set("q", q);
-
-      const data = await apiGet(`/socios?${qs.toString()}`);
-      const items = Array.isArray(data.items) ? data.items : [];
-
-      setSocios((prev) => (append ? [...(prev || []), ...items] : items));
-      setSociosPager({
-        page: data.page || page,
-        per_page: data.per_page || perPage,
-        has_more: Boolean(data.has_more),
-        next_page: data.next_page || null,
-        total: Number.isFinite(data.total) ? data.total : items.length,
-      });
-    } catch (e) {
-      if (!append) setSocios([]);
-      setSociosError(String(e?.message || e));
-    } finally {
-      setSociosLoading(false);
-    }
-  }
-
-  function openSocioForm(mode, socio = null) {
-    setSociosFormMode(mode);
-    setSociosEditing(socio);
-    setSociosFormOpen(true);
-  }
-
-  async function saveSocio(payload) {
-    if (!canUseApi) throw new Error("Falta configurar VITE_API_BASE en el frontend.");
-    if (!isAdmin) throw new Error("Acceso denegado (clave admin).");
-
-    const headers = {
-      "Content-Type": "application/json",
-      "x-admin-token": adminToken,
-    };
-
-    if (sociosFormMode === "edit" && sociosEditing?.id) {
-      const r = await fetch(`${API_BASE}/socios/${encodeURIComponent(sociosEditing.id)}`, {
-        method: "PUT",
-        headers,
-        body: JSON.stringify(payload),
-      });
-      const j = await r.json().catch(() => ({}));
-      if (!r.ok) throw new Error(j.error || j.message || `HTTP ${r.status}`);
-      return { ok: true };
-    }
-
-    const r = await fetch(`${API_BASE}/socios`, {
-      method: "POST",
-      headers,
-      body: JSON.stringify(payload),
-    });
-    const j = await r.json().catch(() => ({}));
-    if (!r.ok) throw new Error(j.error || j.message || `HTTP ${r.status}`);
-    return j;
-  }
-
-  function confirmAdminWithKey(message) {
-    if (!isAdmin) {
-      alert("Acceso denegado: primero activá Admin en Ajustes.");
-      return false;
-    }
-    const ok = window.confirm(message);
-    if (!ok) return false;
-    const entered = window.prompt("Ingresá nuevamente la clave de administrador para confirmar:");
-    if (!entered) return false;
-    if (String(entered).trim() !== String(adminToken || "").trim()) {
-      alert("Clave de administrador incorrecta. Operación cancelada.");
-      return false;
-    }
-    return true;
-  }
-
-  async function deleteSocio(id) {
-    if (!canUseApi) throw new Error("Falta configurar VITE_API_BASE en el frontend.");
-    if (!isAdmin) throw new Error("Acceso denegado (clave admin).");
-    const r = await fetch(`${API_BASE}/socios/${encodeURIComponent(id)}`, {
-      method: "DELETE",
-      headers: { "x-admin-token": adminToken },
-    });
-    const j = await r.json().catch(() => ({}));
-    if (!r.ok) throw new Error(j.error || j.message || `HTTP ${r.status}`);
-    return j;
-  }
-
-  async function updateSocioInline(id, payload) {
-    if (!canUseApi) throw new Error("Falta configurar VITE_API_BASE en el frontend.");
-    if (!isAdmin) throw new Error("Acceso denegado (clave admin).");
-    const r = await fetch(`${API_BASE}/socios/${encodeURIComponent(id)}`, {
-      method: "PUT",
-      headers: {
-        "Content-Type": "application/json",
-        "x-admin-token": adminToken,
-      },
-      body: JSON.stringify(payload),
-    });
-    const j = await r.json().catch(() => ({}));
-    if (!r.ok) throw new Error(j.error || j.message || `HTTP ${r.status}`);
-    return j;
-  }
-
-  async function bulkUpsertSocios(items) {
-    if (!canUseApi) throw new Error("Falta configurar VITE_API_BASE en el frontend.");
-    if (!isAdmin) throw new Error("Acceso denegado (clave admin).");
-
-    const r = await fetch(`${API_BASE}/socios/bulk`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-admin-token": adminToken,
-      },
-      body: JSON.stringify({ items }),
-    });
-    const j = await r.json().catch(() => ({}));
-    if (!r.ok) throw new Error(j.error || j.message || `HTTP ${r.status}`);
-    return j;
-  }
-
-  // CSV helpers (para editar planilla offline)
-  function parseCsv(text) {
-    const t = String(text || "").replace(/^\uFEFF/, ""); // strip BOM
-    const lines = t.split(/\r?\n/).filter((l) => l.trim().length);
-    if (!lines.length) return [];
-
-    // Detect delimiter: Excel (ES) suele usar ';'
-    const headerLine = lines[0];
-    const commaCount = (headerLine.match(/,/g) || []).length;
-    const semiCount = (headerLine.match(/;/g) || []).length;
-    const delim = semiCount > commaCount ? ";" : ",";
-
-    const parseLine = (line) => {
-      const out = [];
-      let cur = "";
-      let inQ = false;
-      for (let i = 0; i < line.length; i++) {
-        const ch = line[i];
-        if (inQ) {
-          if (ch === '"') {
-            if (line[i + 1] === '"') {
-              cur += '"';
-              i++;
-            } else {
-              inQ = false;
-            }
-          } else {
-            cur += ch;
-          }
-        } else {
-          if (ch === '"') inQ = true;
-          else if (ch === delim) {
-            out.push(cur);
-            cur = "";
-          } else {
-            cur += ch;
-          }
-        }
-      }
-      out.push(cur);
-      return out.map((x) => String(x ?? "").trim());
-    };
-
-    const headers = parseLine(lines[0]).map((h) => h.toLowerCase());
-    const idx = (name) => headers.indexOf(String(name).toLowerCase());
-
-    const iNo = idx("member_no");
-    const iName = idx("company_name");
-    const iCat = idx("category");
-    const iExp = idx("expertise");
-    const iWeb = idx("website_url");
-    const iSoc = idx("social_url");
-
-    const rows = [];
-    const errors = [];
-    for (let li = 1; li < lines.length; li++) {
-      const cols = parseLine(lines[li]);
-      const memberNo = parseInt(cols[iNo] || "", 10);
-      const companyName = String(cols[iName] || "").trim();
-      if (!Number.isFinite(memberNo) || memberNo <= 0 || !companyName) continue;
-      const rawCat = String(cols[iCat] || "").trim();
-      const cat = normalizeSocioCategory(rawCat);
-      if (!cat) {
-        errors.push(
-          `Línea ${li + 1}: category inválida "${rawCat}" (usar SERVICIOS / FABRICACION / LOGISTICA)`
-        );
-      }
-      rows.push({
-        member_no: memberNo,
-        company_name: companyName,
-        category: cat || "fabricacion",
-        expertise: String(cols[iExp] || "").trim(),
-        website_url: normalizeUrl(cols[iWeb] || ""),
-        social_url: normalizeUrl(cols[iSoc] || ""),
-      });
-    }
-    return { rows, errors };
-  }
-
-  async function downloadSociosCsv() {
-    if (!isAdmin) return alert("Acceso denegado (clave admin).");
-    setSociosCsvBusy(true);
-    try {
-      const r = await fetch(`${API_BASE}/socios/export.csv`, {
-        headers: { "x-admin-token": adminToken },
-      });
-      if (!r.ok) throw new Error(`Error export (${r.status})`);
-      const blob = await r.blob();
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = "uic_socios.csv";
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      URL.revokeObjectURL(url);
-    } catch (e) {
-      alert(String(e?.message || e));
-    } finally {
-      setSociosCsvBusy(false);
-    }
-  }
-
-  async function uploadSociosCsv() {
-    if (!isAdmin) return alert("Acceso denegado (clave admin).");
-    if (!sociosCsvFile) return alert("Seleccioná un archivo CSV primero.");
-    setSociosCsvBusy(true);
-    try {
-      const txt = await sociosCsvFile.text();
-      const parsed = parseCsv(txt);
-      const items = parsed?.rows || [];
-      const errors = parsed?.errors || [];
-      if (!items.length) throw new Error("No se encontraron filas válidas en el CSV.");
-      if (errors.length) {
-        const msg = errors.slice(0, 12).join("\n") + (errors.length > 12 ? `\n…y ${errors.length - 12} más.` : "");
-        throw new Error(`Hay categorías inválidas en el CSV:\n${msg}`);
-      }
-      await bulkUpsertSocios(items);
-      // refrescar vista socios (si el usuario ya estaba ahí)
-      try {
-        await loadSocios({ page: 1, append: false, category: sociosCategory, q: sociosSearchQuery });
-      } catch (_) {}
-      alert(`OK. Se importaron ${items.length} socios.`);
-      setSociosCsvFile(null);
-    } catch (e) {
-      alert(String(e?.message || e));
-    } finally {
-      setSociosCsvBusy(false);
-    }
-  }
-
-  // Alternativa "sin archivo" (útil si iOS/PWA se pone quisquilloso): pegar CSV en texto
-  async function uploadSociosCsvText() {
-    if (!isAdmin) return alert("Acceso denegado (clave admin).");
-    const txt = String(sociosCsvText || "").trim();
-    if (!txt) return alert("Pegá el contenido CSV primero.");
-    setSociosCsvBusy(true);
-    try {
-      const parsed = parseCsv(txt);
-      const items = parsed?.rows || [];
-      const errors = parsed?.errors || [];
-      if (!items.length) throw new Error("No se encontraron filas válidas en el CSV.");
-      if (errors.length) {
-        const msg = errors.slice(0, 12).join("\n") + (errors.length > 12 ? `\n…y ${errors.length - 12} más.` : "");
-        throw new Error(`Hay categorías inválidas en el CSV:\n${msg}`);
-      }
-      await bulkUpsertSocios(items);
-      try {
-        await loadSocios({ page: 1, append: false, category: sociosCategory, q: sociosSearchQuery });
-      } catch (_) {}
-      alert(`OK. Se importaron ${items.length} socios.`);
-      setSociosCsvText("");
-      setPlanillaOpen(false);
-    } catch (e) {
-      alert(String(e?.message || e));
-    } finally {
-      setSociosCsvBusy(false);
-    }
-  }
-
-  async function openSociosGrid() {
-    setSociosGridError("");
-    setSociosGridOpen(true);
-    setSociosGridLoading(true);
-    try {
-      // Traer todo (máximo 200) para edición masiva.
-      const qs = new URLSearchParams();
-      qs.set("page", "1");
-      qs.set("per_page", "200");
-      const data = await apiGet(`/socios?${qs.toString()}`);
-      setSociosGridItems(Array.isArray(data.items) ? data.items : []);
-    } catch (e) {
-      setSociosGridItems([]);
-      setSociosGridError(String(e?.message || e));
-    } finally {
-      setSociosGridLoading(false);
-    }
-  }
-
-function prettySocioCategory(cat) {
-  const c = String(cat || "").toLowerCase();
-  if (c === "logistica") return "Logística";
-  if (c === "servicios") return "Servicios";
-  return "Fabricación";
-}
 
 // Categorías permitidas para filtros y planilla
 const SOCIO_CATEGORIES = ["fabricacion", "logistica", "servicios"];
@@ -2298,10 +1861,7 @@ async function submitSocioForm() {
 		                      )}
 		                    </button>
 		                  );
-		                })}</span>
-		                    ) : null}
-		                  </button>
-		                ))}
+		                })}
 		              </div>
 		            )}
 		          </>
