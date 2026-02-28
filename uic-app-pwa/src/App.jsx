@@ -3,7 +3,7 @@ import "./index.css";
 import logoUIC from "./assets/logo-uic.jpeg";
 
 // Versión visible (footer / ajustes)
-const APP_VERSION = "0.28.7";
+const APP_VERSION = "0.28.8";
 const BUILD_STAMP = (typeof __UIC_BUILD_STAMP__ !== "undefined") ? __UIC_BUILD_STAMP__ : "";
 const PWA_CACHE_ID = (typeof __UIC_CACHE_ID__ !== "undefined") ? __UIC_CACHE_ID__ : "";
 const PWA_COMMIT = (typeof __UIC_COMMIT__ !== "undefined") ? __UIC_COMMIT__ : "";
@@ -229,19 +229,28 @@ const [memberPwOpen, setMemberPwOpen] = useState(false);
 
   // Carga listado de socios (paginado) para la pantalla "Socios".
   // IMPORTANTE: esta función DEBE existir siempre para evitar pantallas azules por "not defined".
-  async function loadSocios(page = 1) {
+  // Soporta dos firmas:
+  //   loadSocios(1)
+  //   loadSocios({ page: 1, append: false, category: 'LOGISTICA', q: 'tecno' })
+  async function loadSocios(arg = 1) {
     try {
       setSociosLoading(true);
-      const q = (sociosQuery || "").trim();
+      const opts = (arg && typeof arg === "object") ? arg : { page: arg };
+      const page = Number(opts.page || 1);
+      const append = Boolean(opts.append);
+      const q = String((opts.q ?? sociosQuery ?? "")).trim();
+      const category = String((opts.category ?? sociosCategory ?? "")).trim();
       const params = new URLSearchParams();
       params.set("page", String(page));
       params.set("per_page", "50");
       if (q) params.set("q", q);
+      const catNorm = category.toLowerCase();
+      if (catNorm && catNorm !== "all" && catNorm !== "todos") params.set("category", category);
 
       const data = await apiGet(`/socios?${params.toString()}`);
       const items = Array.isArray(data?.items) ? data.items : [];
 
-      setSocios(items);
+      setSocios(prev => (append ? [...(prev || []), ...items] : items));
       setSociosPager({
         page: Number(data?.page || page),
         per_page: Number(data?.per_page || 50),
