@@ -1754,8 +1754,7 @@ app.get("/member/lookup/:memberNo", async (req, res) => {
     if (!memberNo) return res.status(400).json({ error: "member_no requerido" });
     const socio = await getSocioByMemberNo(memberNo);
     if (!socio) return res.status(404).json({ error: "Socio no encontrado" });
-    const def = defaultMemberPassword(socio.company_name);
-    return res.json({ ok: true, member_no: memberNo, company_name: socio.company_name, default_hint: def });
+return res.json({ ok: true, member_no: memberNo, company_name: socio.company_name });
   } catch (e) {
     console.error(e);
     return res.status(500).json({ error: "Error interno" });
@@ -1788,7 +1787,6 @@ app.post("/member/login", async (req, res) => {
       member_no: memberNo,
       company_name: socio.company_name,
       usingDefault,
-      default_hint: defPw, // el frontend puede mostrarlo solo al propio socio (ya lo conoce)
     });
   } catch (e) {
     console.log("⚠️ member/login error:", e?.message || e);
@@ -1841,7 +1839,7 @@ app.post("/member/reset-password", async (req, res) => {
       MEMBER_CREDS_STORE[String(memberNo)] = { password_hash: h, updated_at: new Date().toISOString() };
     }
 
-    return res.json({ ok: true, default_hint: defPw });
+    return res.json({ ok: true });
   } catch (e) {
     console.log("⚠️ member/reset-password error:", e?.message || e);
     return res.status(500).json({ error: "Error interno" });
@@ -1932,7 +1930,7 @@ app.get("/admin/messages/thread/:memberNo", requireAdmin, async (req, res) => {
     if (!memberNo) return res.status(400).json({ error: "memberNo inválido" });
     if (dbReady) {
       const r = await pool.query(
-        "SELECT id, thread_member_no, from_role, message, read_by_admin, read_by_member, created_at FROM uic_messages WHERE thread_member_no=$1 ORDER BY created_at ASC LIMIT 2000",
+        "SELECT id, thread_member_no, from_role, message, read_by_admin, read_by_member, created_at FROM uic_messages WHERE thread_member_no=$1 ORDER BY created_at DESC LIMIT 2000",
         [memberNo]
       );
       const items = (r.rows || []).map((x) => ({
@@ -1978,7 +1976,7 @@ app.get("/member/messages", requireMember, async (req, res) => {
     const memberNo = req.member.memberNo;
     if (dbReady) {
       const r = await pool.query(
-        "SELECT id, thread_member_no, from_role, message, read_by_admin, read_by_member, created_at FROM uic_messages WHERE thread_member_no=$1 ORDER BY created_at ASC LIMIT 2000",
+        "SELECT id, thread_member_no, from_role, message, read_by_admin, read_by_member, created_at FROM uic_messages WHERE thread_member_no=$1 ORDER BY created_at DESC LIMIT 2000",
         [memberNo]
       );
       const items = (r.rows || []).map((x) => ({

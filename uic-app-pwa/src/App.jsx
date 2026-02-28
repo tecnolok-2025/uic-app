@@ -3,7 +3,7 @@ import "./index.css";
 import logoUIC from "./assets/logo-uic.jpeg";
 
 // Versión visible (footer / ajustes)
-const APP_VERSION = "UIC App v0.28";
+const APP_VERSION = "UIC App v0.28.1";
 const BUILD_STAMP = (typeof __UIC_BUILD_STAMP__ !== "undefined") ? __UIC_BUILD_STAMP__ : "";
 const PWA_CACHE_ID = (typeof __UIC_CACHE_ID__ !== "undefined") ? __UIC_CACHE_ID__ : "";
 const PWA_COMMIT = (typeof __UIC_COMMIT__ !== "undefined") ? __UIC_COMMIT__ : "";
@@ -193,12 +193,10 @@ export default function App() {
   const [memberLoginPass, setMemberLoginPass] = useState("");
   const [memberLoginErr, setMemberLoginErr] = useState("");
   const [memberLookupCompany, setMemberLookupCompany] = useState("");
-  const [memberLookupDefaultHint, setMemberLookupDefaultHint] = useState("");
-  const [memberLookupErr, setMemberLookupErr] = useState("");
+const [memberLookupErr, setMemberLookupErr] = useState("");
 
   const [memberUsingDefault, setMemberUsingDefault] = useState(false);
-  const [memberDefaultHint, setMemberDefaultHint] = useState("");
-  const [memberPwOpen, setMemberPwOpen] = useState(false);
+const [memberPwOpen, setMemberPwOpen] = useState(false);
   const [memberPwOld, setMemberPwOld] = useState("");
   const [memberPwNew, setMemberPwNew] = useState("");
   const [memberPwNew2, setMemberPwNew2] = useState("");
@@ -275,16 +273,12 @@ export default function App() {
     if (memberToken) return;
     const raw = String(memberLoginNo || "").trim();
     if (!raw) {
-      setMemberLookupCompany("");
-      setMemberLookupDefaultHint("");
-      setMemberLookupErr("");
+      setMemberLookupCompany("");setMemberLookupErr("");
       return;
     }
     const n = parseInt(raw, 10);
     if (!n) {
-      setMemberLookupCompany("");
-      setMemberLookupDefaultHint("");
-      setMemberLookupErr("Nº de socio inválido");
+      setMemberLookupCompany("");setMemberLookupErr("Nº de socio inválido");
       return;
     }
     setMemberLookupErr("");
@@ -293,18 +287,12 @@ export default function App() {
         const r = await fetch(`${API_BASE}/member/lookup/${n}`);
         const j = await r.json().catch(() => ({}));
         if (!r.ok) {
-          setMemberLookupCompany("");
-          setMemberLookupDefaultHint("");
-          setMemberLookupErr(j?.error || "Socio no encontrado");
+          setMemberLookupCompany("");setMemberLookupErr(j?.error || "Socio no encontrado");
           return;
         }
-        setMemberLookupCompany(String(j?.company_name || "").trim());
-        setMemberLookupDefaultHint(String(j?.default_hint || "").trim());
-        setMemberLookupErr("");
+        setMemberLookupCompany(String(j?.company_name || "").trim());setMemberLookupErr("");
       } catch {
-        setMemberLookupCompany("");
-        setMemberLookupDefaultHint("");
-        setMemberLookupErr("Error de red al buscar socio");
+        setMemberLookupCompany("");setMemberLookupErr("Error de red al buscar socio");
       }
     }, 260);
     return () => clearTimeout(t);
@@ -621,6 +609,22 @@ function formatDateTime(isoStr) {
   if (Number.isNaN(d.getTime())) return String(isoStr);
   return `${pad2(d.getDate())}/${pad2(d.getMonth() + 1)}/${d.getFullYear()} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
 }
+
+function normalizeMsg(raw) {
+  if (!raw) return { id: "", body: "", created_at: "", from_role: "", read_by_admin: false, read_by_member: false };
+  const id = raw.id || raw.ID || "";
+  const body = (raw.body != null ? String(raw.body) : (raw.message != null ? String(raw.message) : "")).trim();
+  const created_at = raw.created_at || raw.createdAt || raw.createdAtISO || "";
+  const from_role = raw.from_role || raw.from || raw.fromRole || "";
+  const read_by_admin = !!(raw.read_by_admin ?? raw.readByAdmin);
+  const read_by_member = !!(raw.read_by_member ?? raw.readByMember);
+  return { id, body, created_at, from_role, read_by_admin, read_by_member };
+}
+
+function normalizeMsgs(list) {
+  return Array.isArray(list) ? list.map(normalizeMsg).filter((m) => m.body || m.created_at) : [];
+}
+
 
 function startOfMonth(d) {
   const x = new Date(d);
@@ -1065,8 +1069,7 @@ async function createEvent(payload) {
       const token = String(j?.token || "").trim();
       const companyName = String(j?.companyName || j?.company_name || "").trim();
       const usingDefault = Boolean(j?.usingDefault ?? j?.using_default);
-      const defHint = String(j?.default_hint || j?.defaultHint || "").trim();
-      if (!token) {
+if (!token) {
         setMemberLoginErr("Respuesta inválida del servidor (sin token).");
         return;
       }
@@ -1076,9 +1079,7 @@ async function createEvent(payload) {
       setMemberToken(token);
       setMemberNo(no);
       setMemberCompany(companyName);
-      setMemberUsingDefault(usingDefault);
-      setMemberDefaultHint(defHint);
-      setMemberPwOld(usingDefault && defHint ? defHint : "");
+      setMemberUsingDefault(usingDefault);setMemberPwOld("");
       setMemberPwMsg("");
       setMemberPwErr("");
       setMemberResetMsg("");
@@ -1102,9 +1103,7 @@ async function createEvent(payload) {
     setMemberCompany("");
     setMemberMsgs([]);
     setMsgsUnseen(0);
-    setMemberUsingDefault(false);
-    setMemberDefaultHint("");
-    setMemberPwOpen(false);
+    setMemberUsingDefault(false);setMemberPwOpen(false);
     setMemberPwOld("");
     setMemberPwNew("");
     setMemberPwNew2("");
@@ -1126,7 +1125,7 @@ async function createEvent(payload) {
         setMsgsError(j?.error || "No se pudieron cargar los mensajes.");
         return;
       }
-      setMemberMsgs(Array.isArray(j?.messages) ? j.messages : []);
+      setMemberMsgs(normalizeMsgs(j?.messages || j?.items));
       await fetch(`${API_BASE}/member/messages/mark-read`, { method: "POST", headers: { "x-member-token": token } }).catch(() => {});
     } catch {
       setMsgsError("Error de red al cargar mensajes.");
@@ -1171,7 +1170,7 @@ async function createEvent(payload) {
       setMemberResetErr("Ingresá un Nº de socio válido.");
       return;
     }
-    const ok = window.confirm("Esto restablece la clave a la clave por defecto. ¿Continuar?");
+    const ok = window.confirm("Esto restablece tu clave inicial. ¿Continuar?");
     if (!ok) return;
     setMsgsBusy(true);
     try {
@@ -1184,12 +1183,8 @@ async function createEvent(payload) {
       if (!r.ok) {
         setMemberResetErr(j?.error || "No se pudo restablecer.");
         return;
-      }
-      const hint = String(j?.default_hint || "").trim();
-      if (hint) setMemberLoginPass(hint);
-      setMemberLookupDefaultHint(hint || memberLookupDefaultHint);
-      setMemberResetMsg(hint ? "Clave restablecida. Ya quedó cargada en el campo Clave." : "Clave restablecida.");
-    } catch {
+      }setMemberResetMsg("Clave restablecida. Usá tu clave inicial informada por UIC o contactate con administración.");
+      } catch {
       setMemberResetErr("Error de red al restablecer.");
     } finally {
       setMsgsBusy(false);
@@ -1256,7 +1251,7 @@ async function createEvent(payload) {
         setMsgsError(j?.error || "No se pudieron cargar los hilos.");
         return;
       }
-      setAdminMsgThreads(Array.isArray(j?.threads) ? j.threads : []);
+      setAdminMsgThreads(Array.isArray(j?.threads) ? j.threads : (Array.isArray(j?.items) ? j.items : []));
       await loadMessagesMeta();
     } catch {
       setMsgsError("Error de red al cargar hilos.");
@@ -1279,7 +1274,7 @@ async function createEvent(payload) {
         setMsgsError(j?.error || "No se pudo abrir el hilo.");
         return;
       }
-      setAdminThreadMsgs(Array.isArray(j?.messages) ? j.messages : []);
+      setAdminThreadMsgs(normalizeMsgs(j?.messages || j?.items));
       await fetch(`${API_BASE}/admin/messages/thread/${encodeURIComponent(no)}/mark-read`, { method: "POST", headers: { "x-admin-token": adminToken } }).catch(() => {});
       await loadMessagesMeta();
       await loadAdminThreads();
@@ -2250,7 +2245,7 @@ async function submitSocioForm() {
 		                <div className="muted">No hay mensajes en este hilo.</div>
 		              ) : (
 		                adminThreadMsgs.map((m) => {
-		                  const mine = (m.direction === "outbound");
+		                  const mine = (m.from_role === "admin");
 		                  return (
 		                    <div key={m.id || m.created_at} className={`msgRow ${mine ? "msgMe" : "msgOther"}`}>
 		                      <div className="msgBubble">
@@ -2272,21 +2267,38 @@ async function submitSocioForm() {
 		              <div className="muted">No hay mensajes aún.</div>
 		            ) : (
 		              <div className="threadsList">
-		                {adminMsgThreads.map((t) => (
-		                  <button
-		                    key={t.member_no}
-		                    className="threadItem"
-		                    onClick={() => openAdminThread(t.member_no, t.company_name)}
-		                  >
-		                    <div style={{ textAlign: "left" }}>
-		                      <div style={{ fontWeight: 800 }}>{t.company_name || "Socio"} <span className="muted">(#{t.member_no})</span></div>
-		                      <div className="muted" style={{ fontSize: 12, marginTop: 2 }}>
-		                        {t.last_message ? String(t.last_message).slice(0, 90) : "(sin mensaje)"}
+		                {adminMsgThreads.map((t) => {
+		                  const memberNo = t.member_no ?? t.memberNo;
+		                  const companyName = t.company_name ?? t.companyName ?? "Socio";
+		                  const lastMessage = t.last_message ?? t.lastMessage ?? "";
+		                  const lastAt = t.last_at ?? t.lastAt ?? "";
+		                  const unread = Number(t.unread_for_admin ?? t.unreadForAdmin ?? 0);
+
+		                  return (
+		                    <button
+		                      key={memberNo}
+		                      className="threadItem"
+		                      onClick={() => openAdminThread(memberNo, companyName)}
+		                    >
+		                      <div style={{ textAlign: "left" }}>
+		                        <div style={{ fontWeight: 800 }}>
+		                          {companyName} <span className="muted">(#{memberNo})</span>
+		                        </div>
+		                        <div className="muted" style={{ fontSize: 12, marginTop: 2 }}>
+		                          {lastMessage ? String(lastMessage).slice(0, 90) : "(sin mensaje)"}
+		                        </div>
+		                        <div className="muted" style={{ fontSize: 11, marginTop: 4 }}>
+		                          {lastAt ? formatDateTime(lastAt) : ""}
+		                        </div>
 		                      </div>
-		                      <div className="muted" style={{ fontSize: 11, marginTop: 4 }}>{t.last_at ? formatDateTime(t.last_at) : ""}</div>
-		                    </div>
-		                    {Number(t.unread_for_admin || 0) > 0 ? (
-		                      <span className="navBadgeNum">{Math.min(99, Number(t.unread_for_admin || 0))}</span>
+		                      {unread > 0 ? (
+		                        <span className="navBadgeNum">{Math.min(99, unread)}</span>
+		                      ) : (
+		                        <span className="pill" style={{ fontSize: 11 }}>leído</span>
+		                      )}
+		                    </button>
+		                  );
+		                })}</span>
 		                    ) : null}
 		                  </button>
 		                ))}
@@ -2335,12 +2347,7 @@ async function submitSocioForm() {
 		                olvidé mi clave
 		              </button>
 		            </div>
-		            {memberLookupDefaultHint ? (
-		              <div className="muted" style={{ marginTop: 8, fontSize: 12 }}>
-		                Clave por defecto: <span style={{ fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace" }}>{memberLookupDefaultHint}</span>
-		              </div>
-		            ) : null}
-		            {memberResetMsg ? <div className="alert" style={{ marginTop: 10 }}>{memberResetMsg}</div> : null}
+{memberResetMsg ? <div className="alert" style={{ marginTop: 10 }}>{memberResetMsg}</div> : null}
 		            {memberResetErr ? <div className="alert" style={{ marginTop: 10 }}>{memberResetErr}</div> : null}
 		            {memberLoginErr ? <div className="alert" style={{ marginTop: 10 }}>{memberLoginErr}</div> : null}
 		          </div>
@@ -2409,12 +2416,12 @@ async function submitSocioForm() {
 		                <div className="muted">Todavía no hay mensajes.</div>
 		              ) : (
 		                memberMsgs.map((m) => {
-		                  const mine = (m.direction === "inbound");
+		                  const mine = (m.from_role === "member");
 		                  return (
 		                    <div key={m.id || m.created_at} className={`msgRow ${mine ? "msgMe" : "msgOther"}`}>
 		                      <div className="msgBubble">
 		                        <div style={{ whiteSpace: "pre-wrap" }}>{m.body}</div>
-		                        <div className="msgMeta">{formatDateTime(m.created_at)}</div>
+		                        <div className="msgMeta">{formatDateTime(m.created_at)}{mine ? (m.read_by_admin ? " · leído" : " · enviado") : ""}</div>
 		                      </div>
 		                    </div>
 		                  );
