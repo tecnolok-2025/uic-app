@@ -2,8 +2,9 @@ import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import { VitePWA } from "vite-plugin-pwa";
 
-// v0.28.2: cache-bust fuerte para iOS/Android + build stamp visible.
-const CACHE_ID = "uic-campana-v0282";
+// v0.28.3: endurecemos el update de PWA para evitar "pantalla azul" por SW viejo
+// sirviendo index.html con assets que ya no existen (hash cambiado).
+const CACHE_ID = "uic-campana-v0283";
 // Render suele exponer el commit como RENDER_GIT_COMMIT. Si no existe, dejamos vacío.
 const COMMIT = process.env.RENDER_GIT_COMMIT || process.env.GITHUB_SHA || process.env.COMMIT_SHA || "";
 
@@ -16,11 +17,18 @@ export default defineConfig({
   plugins: [
     react(),
     VitePWA({
-      registerType: "autoUpdate",
+      // Usamos "prompt" pero lo resolvemos automáticamente desde main.jsx
+      // para forzar activación inmediata + reload (más robusto que autoUpdate en iOS).
+      registerType: "prompt",
       includeAssets: ["icons/icon-192.png", "icons/icon-512.png"],
       workbox: {
         cacheId: CACHE_ID,
         cleanupOutdatedCaches: true,
+        // clave para updates confiables:
+        // - el SW nuevo se activa sin esperar cerrar pestañas
+        // - reclama clientes
+        clientsClaim: true,
+        skipWaiting: true,
         // En algunos iOS, las navegaciones quedan cacheadas agresivamente;
         // cambiamos start_url + cacheId para forzar nueva precache.
       },
@@ -32,8 +40,8 @@ export default defineConfig({
         background_color: "#0b2a4a",
         display: "standalone",
         // start_url versionado para que iOS trate la instalación como nueva
-        id: "/?v=0.28.2",
-        start_url: "/?v=0.28.2",
+        id: "/?v=0.28.3",
+        start_url: "/?v=0.28.3",
         scope: "/",
         icons: [
           { src: "/icons/icon-192.png", sizes: "192x192", type: "image/png" },

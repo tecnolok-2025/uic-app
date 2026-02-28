@@ -24,8 +24,18 @@ const __dirname = path.dirname(new URL(import.meta.url).pathname);
 
 /* ----------------------------- Config ---------------------------------- */
 
-// v0.24: versión visible para diagnóstico
-const API_VERSION = (process.env.API_VERSION || "0.28.0").trim();
+// Versión visible para diagnóstico.
+// Leemos la versión desde package.json para evitar desalineaciones (App vs API).
+let PKG_VERSION = "0.0.0";
+try {
+  const pkgPath = path.join(__dirname, "package.json");
+  const pkgRaw = fs.readFileSync(pkgPath, "utf8");
+  PKG_VERSION = (JSON.parse(pkgRaw)?.version || PKG_VERSION).trim();
+} catch (_) {
+  // Si falla, seguimos con defaults.
+}
+
+const API_VERSION = (process.env.API_VERSION || PKG_VERSION || "0.28.3").trim();
 const API_BUILD_STAMP = (process.env.API_BUILD_STAMP || new Date().toISOString()).trim();
 
 
