@@ -3,7 +3,7 @@ import "./index.css";
 import logoUIC from "./assets/logo-uic.jpeg";
 
 // Versión visible (footer / ajustes)
-const APP_VERSION = "0.28.6";
+const APP_VERSION = "0.28.7";
 const BUILD_STAMP = (typeof __UIC_BUILD_STAMP__ !== "undefined") ? __UIC_BUILD_STAMP__ : "";
 const PWA_CACHE_ID = (typeof __UIC_CACHE_ID__ !== "undefined") ? __UIC_CACHE_ID__ : "";
 const PWA_COMMIT = (typeof __UIC_COMMIT__ !== "undefined") ? __UIC_COMMIT__ : "";
@@ -1353,6 +1353,38 @@ if (!token) {
       await loadMessagesMeta();
     } catch {
       setMemberLoginErr("Error de red al iniciar sesión.");
+    } finally {
+      setMsgsBusy(false);
+    }
+  }
+
+
+  async function memberResetPassword() {
+    setMemberResetMsg("");
+    setMemberResetErr("");
+    const no = String(memberLoginNo || "").trim();
+    if (!no) {
+      setMemberResetErr("Ingresá tu Nº de socio para restablecer la clave.");
+      return;
+    }
+    setMsgsBusy(true);
+    try {
+      const r = await fetch(`${API_BASE}/member/reset-password`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ member_no: parseInt(no, 10) }),
+      });
+      let j = null;
+      try { j = await r.json(); } catch (_) {}
+      if (!r.ok || !j?.ok) {
+        const msg = j?.error || "No se pudo restablecer la clave.";
+        setMemberResetErr(msg);
+        return;
+      }
+      // No mostramos la clave por defecto por seguridad (se informa por canal oficial).
+      setMemberResetMsg("Clave restablecida a la clave inicial. Si no recordás la clave, contactá a UIC.");
+    } catch (e) {
+      setMemberResetErr(e?.message || "Error de red.");
     } finally {
       setMsgsBusy(false);
     }

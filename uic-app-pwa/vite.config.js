@@ -4,7 +4,7 @@ import { VitePWA } from "vite-plugin-pwa";
 
 // v0.28.3: endurecemos el update de PWA para evitar "pantalla azul" por SW viejo
 // sirviendo index.html con assets que ya no existen (hash cambiado).
-const CACHE_ID = "uic-campana-v0286";
+const CACHE_ID = "uic-campana-v0287";
 // Render suele exponer el commit como RENDER_GIT_COMMIT. Si no existe, dejamos vacío.
 const COMMIT = process.env.RENDER_GIT_COMMIT || process.env.GITHUB_SHA || process.env.COMMIT_SHA || "";
 
