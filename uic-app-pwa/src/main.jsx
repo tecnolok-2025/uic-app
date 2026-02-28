@@ -3,7 +3,14 @@ import ReactDOM from "react-dom/client";
 import App from "./App.jsx";
 import "./index.css";
 
-const APP_VERSION = "0.28.5";
+const APP_VERSION = "0.28.9";
+
+// Seguridad/UX: por defecto NO dejamos el modo admin "pegado" entre sesiones.
+// El admin deberá reingresar la clave en Ajustes (evita que aparezca 'Admin ACTIVO' sin querer).
+try {
+  const keep = new URLSearchParams(location.search).get("keepAdmin");
+  if (!keep) sessionStorage.removeItem("uic_admin_token");
+} catch (_) {}
 // PWA: registro explícito para updates más confiables.
 // Evita el caso típico de "pantalla azul" cuando un Service Worker viejo
 // sirve un index.html que apunta a assets (hash) que ya no existen.

@@ -10,6 +10,15 @@ import crypto from "crypto";
 // En ESM no existe __dirname por defecto
 const __dirname = path.dirname(new URL(import.meta.url).pathname);
 
+// Normaliza strings para comparaciones (lowercase + sin tildes/diacríticos)
+function normStr(v) {
+  return String(v ?? "")
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+}
+
 /**
  * UIC Campana API (Node/Express)
  * - Health check
@@ -1371,8 +1380,9 @@ app.get("/socios", async (req, res) => {
   const page = Math.max(parseInt(req.query.page || "1", 10) || 1, 1);
   // Soportar edición masiva (grilla) desde el frontend admin.
   const perPage = Math.min(Math.max(parseInt(req.query.per_page || "25", 10) || 25, 5), 200);
-  const category = (req.query.category || "").toString().trim().toLowerCase();
-  const q = (req.query.q || "").toString().trim().toLowerCase();
+  // Acepta categorías con o sin tildes ("Logística" == "logistica")
+  const category = normStr(req.query.category || "");
+  const q = normStr(req.query.q || "");
 
   const offset = (page - 1) * perPage;
 
@@ -1431,10 +1441,10 @@ app.get("/socios", async (req, res) => {
 
   // JSON fallback
   let items = (SOCIOS_STORE.items || []).slice();
-  if (category && category !== "todos") items = items.filter((x) => (x.category || "").toLowerCase() === category);
+  if (category && category !== "todos") items = items.filter((x) => normStr(x.category || "") === category);
   if (q) {
     items = items.filter((x) => {
-      const n = String(x.company_name || "").toLowerCase();
+      const n = normStr(x.company_name || "");
       const mn = String(x.member_no || "");
       return n.includes(q) || mn.includes(q);
     });

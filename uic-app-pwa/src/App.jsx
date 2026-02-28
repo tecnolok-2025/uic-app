@@ -3,7 +3,7 @@ import "./index.css";
 import logoUIC from "./assets/logo-uic.jpeg";
 
 // Versión visible (footer / ajustes)
-const APP_VERSION = "0.28.8";
+const APP_VERSION = "0.28.9";
 const BUILD_STAMP = (typeof __UIC_BUILD_STAMP__ !== "undefined") ? __UIC_BUILD_STAMP__ : "";
 const PWA_CACHE_ID = (typeof __UIC_CACHE_ID__ !== "undefined") ? __UIC_CACHE_ID__ : "";
 const PWA_COMMIT = (typeof __UIC_COMMIT__ !== "undefined") ? __UIC_COMMIT__ : "";
@@ -125,6 +125,20 @@ async function hardRefreshWithBadge(onStart) {
 }
 
 export default function App() {
+  // Normaliza texto (lowercase + sin tildes). Útil para filtros y querys al API.
+  const normStr = (v) =>
+    String(v ?? "")
+      .trim()
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "");
+
+  const normCategory = (cat) => {
+    const c = normStr(cat);
+    if (!c) return "";
+    if (c === "todos" || c === "all") return "";
+    return c;
+  };
   const [tab, setTab] = useState("inicio"); // inicio | publicaciones | beneficios | agenda | comunicacion | ajustes
 
   const [posts, setPosts] = useState([]);
@@ -243,9 +257,9 @@ const [memberPwOpen, setMemberPwOpen] = useState(false);
       const params = new URLSearchParams();
       params.set("page", String(page));
       params.set("per_page", "50");
-      if (q) params.set("q", q);
-      const catNorm = category.toLowerCase();
-      if (catNorm && catNorm !== "all" && catNorm !== "todos") params.set("category", category);
+      if (q) params.set("q", normStr(q));
+      const cat = normCategory(category);
+      if (cat) params.set("category", cat);
 
       const data = await apiGet(`/socios?${params.toString()}`);
       const items = Array.isArray(data?.items) ? data.items : [];
