@@ -25,7 +25,7 @@ const __dirname = path.dirname(new URL(import.meta.url).pathname);
 /* ----------------------------- Config ---------------------------------- */
 
 // v0.24: versión visible para diagnóstico
-const API_VERSION = (process.env.API_VERSION || "0.25.0").trim();
+const API_VERSION = (process.env.API_VERSION || "0.28.0").trim();
 const API_BUILD_STAMP = (process.env.API_BUILD_STAMP || new Date().toISOString()).trim();
 
 
@@ -1746,6 +1746,21 @@ app.delete("/socios/:id", requireAdmin, async (req, res) => {
 
 
 /* --------------------- Member login / password endpoints ---------------- */
+
+// Lookup (sin login) para mostrar “Empresa” antes de ingresar
+app.get("/member/lookup/:memberNo", async (req, res) => {
+  try {
+    const memberNo = parseInt(req.params.memberNo, 10);
+    if (!memberNo) return res.status(400).json({ error: "member_no requerido" });
+    const socio = await getSocioByMemberNo(memberNo);
+    if (!socio) return res.status(404).json({ error: "Socio no encontrado" });
+    const def = defaultMemberPassword(socio.company_name);
+    return res.json({ ok: true, member_no: memberNo, company_name: socio.company_name, default_hint: def });
+  } catch (e) {
+    console.error(e);
+    return res.status(500).json({ error: "Error interno" });
+  }
+});
 
 app.post("/member/login", async (req, res) => {
   try {

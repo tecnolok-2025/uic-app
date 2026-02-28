@@ -3,7 +3,7 @@ import "./index.css";
 import logoUIC from "./assets/logo-uic.jpeg";
 
 // Versión visible (footer / ajustes)
-const APP_VERSION = "UIC App v0.27";
+const APP_VERSION = "UIC App v0.28";
 const BUILD_STAMP = (typeof __UIC_BUILD_STAMP__ !== "undefined") ? __UIC_BUILD_STAMP__ : "";
 const PWA_CACHE_ID = (typeof __UIC_CACHE_ID__ !== "undefined") ? __UIC_CACHE_ID__ : "";
 const PWA_COMMIT = (typeof __UIC_COMMIT__ !== "undefined") ? __UIC_COMMIT__ : "";
@@ -124,7 +124,7 @@ async function hardRefreshWithBadge(onStart) {
   // 4) Recargar (con query versionada para cache-bust fuerte)
   try {
     const u = new URL(window.location.href);
-    u.searchParams.set("v", "0.27");
+    u.searchParams.set("v", "0.28");
     u.searchParams.set("ts", String(Date.now()));
     window.location.href = u.toString();
   } catch (_) {
@@ -139,6 +139,12 @@ export default function App() {
   const [postsPager, setPostsPager] = useState({ page: 1, per_page: 6, limit_total: 100, has_more: false });
   const [loadingPosts, setLoadingPosts] = useState(false);
   const [errorPosts, setErrorPosts] = useState("");
+
+  // Inicio: últimas publicaciones con flechas (paginado, sin botón “Más”)
+  const [homePosts, setHomePosts] = useState([]);
+  const [homePager, setHomePager] = useState({ page: 1, per_page: 6, limit_total: 100, has_more: false });
+  const [homeLoading, setHomeLoading] = useState(false);
+  const [homeError, setHomeError] = useState("");
 
   const [searchDraft, setSearchDraft] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
@@ -186,6 +192,21 @@ export default function App() {
   const [memberLoginNo, setMemberLoginNo] = useState("");
   const [memberLoginPass, setMemberLoginPass] = useState("");
   const [memberLoginErr, setMemberLoginErr] = useState("");
+  const [memberLookupCompany, setMemberLookupCompany] = useState("");
+  const [memberLookupDefaultHint, setMemberLookupDefaultHint] = useState("");
+  const [memberLookupErr, setMemberLookupErr] = useState("");
+
+  const [memberUsingDefault, setMemberUsingDefault] = useState(false);
+  const [memberDefaultHint, setMemberDefaultHint] = useState("");
+  const [memberPwOpen, setMemberPwOpen] = useState(false);
+  const [memberPwOld, setMemberPwOld] = useState("");
+  const [memberPwNew, setMemberPwNew] = useState("");
+  const [memberPwNew2, setMemberPwNew2] = useState("");
+  const [memberPwMsg, setMemberPwMsg] = useState("");
+  const [memberPwErr, setMemberPwErr] = useState("");
+
+  const [memberResetMsg, setMemberResetMsg] = useState("");
+  const [memberResetErr, setMemberResetErr] = useState("");
   const [memberMsgs, setMemberMsgs] = useState([]);
   const [memberMsgDraft, setMemberMsgDraft] = useState("");
 
@@ -197,6 +218,7 @@ export default function App() {
   const [msgsUnseen, setMsgsUnseen] = useState(0);
   const [msgsBusy, setMsgsBusy] = useState(false);
   const [msgsError, setMsgsError] = useState("");
+  const [msgsMode, setMsgsMode] = useState(() => (adminToken ? "admin" : "socio")); // socio | admin
 
   // UX: overlay al forzar actualización (en algunos celulares tarda y parece que "no hizo nada")
   const [refreshing, setRefreshing] = useState(false);
@@ -223,21 +245,71 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [adminToken, memberToken]);
 
+  // Si el admin está activo, priorizamos modo admin. Si no, modo socio.
+  useEffect(() => {
+    if (adminToken) setMsgsMode("admin");
+    else setMsgsMode("socio");
+  }, [adminToken]);
+
   // Al entrar a la sección “comunicación al administrador”, cargamos lo necesario
   useEffect(() => {
     if (tab !== "mensajes") return;
     setMsgsError("");
-    if (adminToken) {
+    if (msgsMode === "admin") {
+      if (!adminToken) return; // el usuario puede estar viendo el modo admin pero sin activar admin
       loadAdminThreads();
       return;
     }
+    // modo socio
     if (memberToken) {
       loadMemberMessages();
       return;
     }
     // sin sesión: queda el form de login
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tab]);
+  }, [tab, msgsMode]);
+
+  // Lookup de socio por Nº (para mostrar Empresa antes del login)
+  useEffect(() => {
+    if (tab !== "mensajes") return;
+    if (memberToken) return;
+    const raw = String(memberLoginNo || "").trim();
+    if (!raw) {
+      setMemberLookupCompany("");
+      setMemberLookupDefaultHint("");
+      setMemberLookupErr("");
+      return;
+    }
+    const n = parseInt(raw, 10);
+    if (!n) {
+      setMemberLookupCompany("");
+      setMemberLookupDefaultHint("");
+      setMemberLookupErr("Nº de socio inválido");
+      return;
+    }
+    setMemberLookupErr("");
+    const t = setTimeout(async () => {
+      try {
+        const r = await fetch(`${API_BASE}/member/lookup/${n}`);
+        const j = await r.json().catch(() => ({}));
+        if (!r.ok) {
+          setMemberLookupCompany("");
+          setMemberLookupDefaultHint("");
+          setMemberLookupErr(j?.error || "Socio no encontrado");
+          return;
+        }
+        setMemberLookupCompany(String(j?.company_name || "").trim());
+        setMemberLookupDefaultHint(String(j?.default_hint || "").trim());
+        setMemberLookupErr("");
+      } catch {
+        setMemberLookupCompany("");
+        setMemberLookupDefaultHint("");
+        setMemberLookupErr("Error de red al buscar socio");
+      }
+    }, 260);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [memberLoginNo, tab, memberToken]);
 
   // Socios (directorio)
   const [socios, setSocios] = useState([]);
@@ -388,6 +460,43 @@ useEffect(() => {
     }
   }
 
+  async function loadHomePosts(opts = {}) {
+    const { perPage = 6, page = 1, limitTotal = 100, category = categoryParam, q = "" } = opts;
+
+    if (!canUseApi) {
+      setHomeError("Falta configurar VITE_API_BASE en el frontend.");
+      return;
+    }
+
+    setHomeLoading(true);
+    setHomeError("");
+    try {
+      const qs = new URLSearchParams();
+      qs.set("per_page", String(perPage));
+      qs.set("page", String(page));
+      qs.set("limit_total", String(limitTotal));
+      if (q) qs.set("search", q);
+      if (category) qs.set("category", category);
+
+      const data = await apiGet(`/wp/posts?${qs.toString()}`);
+      const raw = (data.items || []).map(normalizePost);
+      setHomePosts(raw);
+      setHomePager({
+        page: data.page || page,
+        per_page: data.per_page || perPage,
+        limit_total: data.limit_total || limitTotal,
+        has_more: Boolean(data.has_more),
+        next_page: data.next_page || null,
+      });
+    } catch (e) {
+      setHomePosts([]);
+      setHomeError("No se pudo cargar publicaciones del inicio. Revisá conexión / WP (feed)." );
+      console.error(e);
+    } finally {
+      setHomeLoading(false);
+    }
+  }
+
   async function loadPosts(opts = {}) {
     const { perPage = 6, page = 1, limitTotal = 100, category = categoryParam, q = searchQuery, append = false } = opts;
 
@@ -440,6 +549,7 @@ useEffect(() => {
 
   useEffect(() => {
     loadCategories();
+    loadHomePosts({ perPage: 6, page: 1, category: categoryParam, q: "" });
     loadPosts({ perPage: 6, page: 1 });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -454,11 +564,11 @@ useEffect(() => {
   useEffect(() => {
     if (tab === "inicio") {
       // En Inicio, siempre mostrar últimas publicaciones (sin búsqueda)
-      loadPosts({ perPage: 6, page: 1, append: false, q: "" });
+      loadHomePosts({ perPage: 6, page: 1, category: categoryParam, q: "" });
       return;
     }
     if (tab === "publicaciones") {
-      loadPosts({ perPage: 6, page: 1, append: false, q: searchQuery });
+      loadPosts({ perPage: 6, page: 1, append: false, category: categoryParam, q: searchQuery });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab, categorySlug, searchQuery]);
@@ -485,18 +595,16 @@ useEffect(() => {
 
 
   const quickLinks = [
-    { label: "Hacete socio", href: "https://uic-campana.com.ar/hacete-socio/" },
-    { label: "Promoción Industrial", href: "https://uic-campana.com.ar/category/promocion-industrial/" },
-    { label: "Beneficios", href: "#", onClick: () => setTab("beneficios") },
-    { label: "Agenda", href: "#", onClick: () => setTab("agenda") },
-    { label: "Comunicación al socio", href: "#", onClick: () => { setTab("comunicacion"); } },
-    { label: "Socios", href: "#", onClick: () => { setTab("socios"); } },
-    { label: "Requerimientos Institucionales", href: "https://cpf-web.onrender.com/" },
-    { label: "comunicación al administrador", href: "#", onClick: () => { setTab("mensajes"); }, badge: (msgsUnseen || 0) },
-    { label: "Sitio UIC", href: "https://uic-campana.com.ar" },
+    { key: "hacete_socio", label: "Hacete socio", href: "https://uic-campana.com.ar/hacete-socio/" },
+    { key: "promocion_industrial", label: "Promoción Industrial", href: "https://uic-campana.com.ar/category/promocion-industrial/" },
+    { key: "beneficios", label: "Beneficios", href: "#", onClick: () => setTab("beneficios") },
+    { key: "agenda", label: "Agenda", href: "#", onClick: () => setTab("agenda") },
+    { key: "comunicacion_socio", label: "Comunicación al socio", href: "#", onClick: () => { setTab("comunicacion"); } },
+    { key: "socios", label: "Socios", href: "#", onClick: () => { setTab("socios"); } },
+    { key: "req_institucionales", label: "Requerimientos Institucionales", href: "https://cpf-web.onrender.com/" },
+    { key: "mensajes_admin", label: "comunicación al administrador", href: "#", onClick: () => { setTab("mensajes"); }, badge: (msgsUnseen || 0) },
+    { key: "sitio_uic", label: "Sitio UIC", href: "https://uic-campana.com.ar" },
   ];
-
-  const homeCards = posts.slice(0, 6);
 
   // ---------------- Agenda helpers ----------------
 
@@ -806,7 +914,7 @@ async function createEvent(payload) {
                 disabled={saving}
                 onClick={async () => {
                   if (!onDelete) return;
-                  const ok = confirm("¿Eliminar este socio del directorio?");
+                  const ok = confirmAdminWithKey(`¿Eliminar este socio del directorio? (${memberNo} – ${companyName})`);
                   if (!ok) return;
                   setSaving(true);
                   try {
@@ -955,7 +1063,9 @@ async function createEvent(payload) {
         return;
       }
       const token = String(j?.token || "").trim();
-      const companyName = String(j?.companyName || "").trim();
+      const companyName = String(j?.companyName || j?.company_name || "").trim();
+      const usingDefault = Boolean(j?.usingDefault ?? j?.using_default);
+      const defHint = String(j?.default_hint || j?.defaultHint || "").trim();
       if (!token) {
         setMemberLoginErr("Respuesta inválida del servidor (sin token).");
         return;
@@ -966,6 +1076,13 @@ async function createEvent(payload) {
       setMemberToken(token);
       setMemberNo(no);
       setMemberCompany(companyName);
+      setMemberUsingDefault(usingDefault);
+      setMemberDefaultHint(defHint);
+      setMemberPwOld(usingDefault && defHint ? defHint : "");
+      setMemberPwMsg("");
+      setMemberPwErr("");
+      setMemberResetMsg("");
+      setMemberResetErr("");
       setMemberLoginPass("");
       await loadMemberMessages(token);
       await loadMessagesMeta();
@@ -985,6 +1102,16 @@ async function createEvent(payload) {
     setMemberCompany("");
     setMemberMsgs([]);
     setMsgsUnseen(0);
+    setMemberUsingDefault(false);
+    setMemberDefaultHint("");
+    setMemberPwOpen(false);
+    setMemberPwOld("");
+    setMemberPwNew("");
+    setMemberPwNew2("");
+    setMemberPwMsg("");
+    setMemberPwErr("");
+    setMemberResetMsg("");
+    setMemberResetErr("");
   }
 
   async function loadMemberMessages(tokenOverride) {
@@ -1030,6 +1157,89 @@ async function createEvent(payload) {
       await loadMessagesMeta();
     } catch {
       setMsgsError("Error de red al enviar.");
+    } finally {
+      setMsgsBusy(false);
+    }
+  }
+
+  async function memberResetPassword() {
+    setMemberResetMsg("");
+    setMemberResetErr("");
+    const raw = String(memberLoginNo || "").trim();
+    const n = parseInt(raw, 10);
+    if (!n) {
+      setMemberResetErr("Ingresá un Nº de socio válido.");
+      return;
+    }
+    const ok = window.confirm("Esto restablece la clave a la clave por defecto. ¿Continuar?");
+    if (!ok) return;
+    setMsgsBusy(true);
+    try {
+      const r = await fetch(`${API_BASE}/member/reset-password`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ memberNo: n }),
+      });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        setMemberResetErr(j?.error || "No se pudo restablecer.");
+        return;
+      }
+      const hint = String(j?.default_hint || "").trim();
+      if (hint) setMemberLoginPass(hint);
+      setMemberLookupDefaultHint(hint || memberLookupDefaultHint);
+      setMemberResetMsg(hint ? "Clave restablecida. Ya quedó cargada en el campo Clave." : "Clave restablecida.");
+    } catch {
+      setMemberResetErr("Error de red al restablecer.");
+    } finally {
+      setMsgsBusy(false);
+    }
+  }
+
+  async function memberChangePassword() {
+    setMemberPwMsg("");
+    setMemberPwErr("");
+    const token = memberToken;
+    if (!token) {
+      setMemberPwErr("Primero iniciá sesión como socio.");
+      return;
+    }
+    const oldPw = String(memberPwOld || "");
+    const newPw = String(memberPwNew || "");
+    const newPw2 = String(memberPwNew2 || "");
+    if (!oldPw || !newPw || !newPw2) {
+      setMemberPwErr("Completá clave actual, nueva clave y confirmación.");
+      return;
+    }
+    if (newPw !== newPw2) {
+      setMemberPwErr("La nueva clave y su confirmación no coinciden.");
+      return;
+    }
+    if (newPw.length < 6) {
+      setMemberPwErr("La nueva clave debe tener al menos 6 caracteres.");
+      return;
+    }
+    setMsgsBusy(true);
+    try {
+      const r = await fetch(`${API_BASE}/member/change-password`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-member-token": token },
+        body: JSON.stringify({ oldPassword: oldPw, newPassword: newPw }),
+      });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        setMemberPwErr(j?.error || "No se pudo cambiar la clave.");
+        return;
+      }
+      setMemberPwMsg("Clave cambiada correctamente.");
+      setMemberPwErr("");
+      setMemberUsingDefault(false);
+      setMemberPwOpen(false);
+      setMemberPwOld("");
+      setMemberPwNew("");
+      setMemberPwNew2("");
+    } catch {
+      setMemberPwErr("Error de red al cambiar clave.");
     } finally {
       setMsgsBusy(false);
     }
@@ -1159,6 +1369,22 @@ async function createEvent(payload) {
     const j = await r.json().catch(() => ({}));
     if (!r.ok) throw new Error(j.error || j.message || `HTTP ${r.status}`);
     return j;
+  }
+
+  function confirmAdminWithKey(message) {
+    if (!isAdmin) {
+      alert("Acceso denegado: primero activá Admin en Ajustes.");
+      return false;
+    }
+    const ok = window.confirm(message);
+    if (!ok) return false;
+    const entered = window.prompt("Ingresá nuevamente la clave de administrador para confirmar:");
+    if (!entered) return false;
+    if (String(entered).trim() !== String(adminToken || "").trim()) {
+      alert("Clave de administrador incorrecta. Operación cancelada.");
+      return false;
+    }
+    return true;
   }
 
   async function deleteSocio(id) {
@@ -1498,29 +1724,40 @@ async function submitSocioForm() {
               <div className="cardTitle">Accesos rápidos</div>
               <div className="quickGrid">
                 {quickLinks.map((x) => (
-                  <a
-                    key={x.label}
-                    className={cls("quickTile", x.disabled && "quickTileDisabled")}
-                    href={x.href}
-                    aria-disabled={x.disabled ? "true" : "false"}
-                    onClick={(e) => {
-                      if (x.disabled) {
-                        e.preventDefault();
-                        return;
-                      }
-                      if (x.onClick) {
-                        e.preventDefault();
-                        x.onClick();
-                      }
-                    }}
-                    target={x.href.startsWith("http") ? "_blank" : undefined}
-                    rel={x.href.startsWith("http") ? "noreferrer" : undefined}
-              >
-                <span>{x.label}</span>
-                {!x.disabled && Number(x.badge || 0) > 0 ? (
-                  <span className="quickBadge">{Math.min(99, Number(x.badge || 0))}</span>
-                ) : null}
-              </a>
+                  x.onClick || x.href === "#" ? (
+                    <button
+                      key={x.key}
+                      type="button"
+                      className={cls("quickTile", x.disabled && "quickTileDisabled")}
+                      aria-disabled={x.disabled ? "true" : "false"}
+                      onClick={() => {
+                        if (x.disabled) return;
+                        x.onClick?.();
+                      }}
+                    >
+                      <span>{x.label}</span>
+                      {!x.disabled && Number(x.badge || 0) > 0 ? (
+                        <span className="quickBadge">{Math.min(99, Number(x.badge || 0))}</span>
+                      ) : null}
+                    </button>
+                  ) : (
+                    <a
+                      key={x.key}
+                      className={cls("quickTile", x.disabled && "quickTileDisabled")}
+                      href={x.href}
+                      aria-disabled={x.disabled ? "true" : "false"}
+                      target={x.href.startsWith("http") ? "_blank" : undefined}
+                      rel={x.href.startsWith("http") ? "noreferrer" : undefined}
+                      onClick={(e) => {
+                        if (x.disabled) e.preventDefault();
+                      }}
+                    >
+                      <span>{x.label}</span>
+                      {!x.disabled && Number(x.badge || 0) > 0 ? (
+                        <span className="quickBadge">{Math.min(99, Number(x.badge || 0))}</span>
+                      ) : null}
+                    </a>
+                  )
                 ))}
               </div>
             </section>
@@ -1532,16 +1769,22 @@ async function submitSocioForm() {
                   <div className="cardSub">Lectura desde el feed público de WordPress</div>
                 </div>
                 <div className="row" style={{ gap: 8 }}>
-                  {postsPager.has_more && (
-                    <button
-                      className="btnSecondary"
-                      disabled={loadingPosts}
-                      onClick={() => loadPosts({ perPage: postsPager.per_page || 6, page: (postsPager.page || 1) + 1, append: true, category: categoryParam, q: "" })}
-                      title="Cargar más"
-                    >
-                      Más
-                    </button>
-                  )}
+                  <button
+                    className="btnSecondary"
+                    disabled={homeLoading || (homePager.page || 1) <= 1}
+                    onClick={() => loadHomePosts({ perPage: homePager.per_page || 6, page: Math.max(1, (homePager.page || 1) - 1), category: categoryParam, q: "" })}
+                    title="Anterior"
+                  >
+                    ◀
+                  </button>
+                  <button
+                    className="btnSecondary"
+                    disabled={homeLoading || !homePager.has_more}
+                    onClick={() => loadHomePosts({ perPage: homePager.per_page || 6, page: (homePager.page || 1) + 1, category: categoryParam, q: "" })}
+                    title="Siguiente"
+                  >
+                    ▶
+                  </button>
                 </div>
               </div>
 
@@ -1571,24 +1814,14 @@ async function submitSocioForm() {
               </div>
 
               <div className="muted" style={{ marginTop: 6 }}>
-                Mostrando {posts.length} publicaciones
+                Mostrando {homePosts.length} publicaciones (página {homePager.page || 1})
               </div>
 
-              {loadingPosts ? (
+              {homeLoading ? (
                 <div className="muted">Cargando…</div>
               ) : (
-                <div className="cardsScroller"
-                  onScroll={(e) => {
-                    const el = e.currentTarget;
-                    if (!el) return;
-                    const nearEnd = el.scrollLeft + el.clientWidth >= el.scrollWidth - 40;
-                    if (!nearEnd) return;
-                    if (loadingPosts) return;
-                    if (!postsPager.has_more) return;
-                    loadPosts({ perPage: postsPager.per_page || 6, page: (postsPager.page || 1) + 1, append: true, category: categoryParam, q: "" });
-                  }}
-                >
-                  {posts.map((p) => (
+                <div className="cardsScroller">
+                  {homePosts.map((p) => (
                     <a key={p.id} className="postCard" href={p.link} target="_blank" rel="noreferrer">
                       {p.image ? <img className="postImg" src={p.image} alt="" /> : <div className="postImgPlaceholder" />}
                       <div className="postBody">
@@ -1597,9 +1830,10 @@ async function submitSocioForm() {
                       </div>
                     </a>
                   ))}
-                  {posts.length === 0 && <div className="muted">No hay publicaciones disponibles.</div>}
+                  {homePosts.length === 0 && <div className="muted">No hay publicaciones disponibles.</div>}
                 </div>
               )}
+              {homeError ? <div className="alert" style={{ marginTop: 10 }}>{homeError}</div> : null}
             </section>
           </>
         )}
@@ -1950,27 +2184,42 @@ async function submitSocioForm() {
 		        </div>
 		      </div>
 		      <div className="row" style={{ gap: 8, alignItems: "center", flexWrap: "wrap", justifyContent: "flex-end" }}>
-		        {adminToken ? (
-		          <span className="pill">Modo administrador</span>
-		        ) : memberToken ? (
-		          <span className="pill">Sesión socio #{memberNo || ""}</span>
-		        ) : (
-		          <span className="pill">Acceso de socio</span>
-		        )}
+		        <button
+		          className={msgsMode === "socio" ? "pill pillActive" : "pill"}
+		          onClick={() => setMsgsMode("socio")}
+		          type="button"
+		        >
+		          socio
+		        </button>
+		        <button
+		          className={msgsMode === "admin" ? "pill pillActive" : "pill"}
+		          onClick={() => setMsgsMode("admin")}
+		          type="button"
+		          disabled={!adminToken}
+		          title={!adminToken ? "Activá Admin en Ajustes" : ""}
+		        >
+		          administrador
+		        </button>
 		        <button
 		          className="btnSecondary"
+		          type="button"
 		          onClick={() => {
-		            if (adminToken) return loadAdminThreads();
-		            if (memberToken) return loadMemberMessages();
+		            setMsgsError("");
+		            if (msgsMode === "admin") {
+		              if (!adminToken) return setMsgsError("Para ver hilos como administrador, activá Admin en Ajustes.");
+		              return loadAdminThreads();
+		            }
+		            if (!memberToken) return setMsgsError("Ingresá con tu Nº de socio y clave para actualizar.");
+		            return loadMemberMessages();
 		          }}
 		        >
-		          Actualizar
+		          actualizar
 		        </button>
-		        {memberToken && !adminToken && (
-		          <button className="btnSecondary" onClick={memberLogout}>
-		            Cerrar sesión
+		        {msgsMode === "socio" && memberToken ? (
+		          <button className="btnSecondary" type="button" onClick={memberLogout}>
+		            cerrar sesión
 		          </button>
-		        )}
+		        ) : null}
 		      </div>
 		    </div>
 
@@ -1981,10 +2230,12 @@ async function submitSocioForm() {
 		      </div>
 		    ) : null}
 
-		    {/* Admin */}
-		    {adminToken ? (
+		    {/* Contenido según modo */}
+		    {msgsMode === "admin" ? (
 		      <div style={{ marginTop: 12 }}>
-		        {adminThreadNo ? (
+		        {!adminToken ? (
+		          <div className="alert">Para ver mensajes como administrador, activá Admin en Ajustes (guardando la clave admin en este dispositivo).</div>
+		        ) : adminThreadNo ? (
 		          <>
 		            <div className="rowBetween" style={{ gap: 8, alignItems: "center" }}>
 		              <div>
@@ -2060,6 +2311,15 @@ async function submitSocioForm() {
 		                onChange={(e) => setMemberLoginNo(e.target.value)}
 		                style={{ width: 160 }}
 		              />
+		              {memberLookupCompany ? (
+		                <div className="pill pillActive" title="Empresa asociada al Nº de socio" style={{ alignSelf: "center" }}>
+		                  {memberLookupCompany}
+		                </div>
+		              ) : memberLookupErr ? (
+		                <div className="pill" title={memberLookupErr} style={{ alignSelf: "center" }}>
+		                  (no encontrado)
+		                </div>
+		              ) : null}
 		              <input
 		                className="input"
 		                placeholder="Clave"
@@ -2071,7 +2331,17 @@ async function submitSocioForm() {
 		              <button className="btnPrimary" onClick={memberLogin}>
 		                Ingresar
 		              </button>
+		              <button className="btnSecondary" type="button" onClick={memberResetPassword}>
+		                olvidé mi clave
+		              </button>
 		            </div>
+		            {memberLookupDefaultHint ? (
+		              <div className="muted" style={{ marginTop: 8, fontSize: 12 }}>
+		                Clave por defecto: <span style={{ fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace" }}>{memberLookupDefaultHint}</span>
+		              </div>
+		            ) : null}
+		            {memberResetMsg ? <div className="alert" style={{ marginTop: 10 }}>{memberResetMsg}</div> : null}
+		            {memberResetErr ? <div className="alert" style={{ marginTop: 10 }}>{memberResetErr}</div> : null}
 		            {memberLoginErr ? <div className="alert" style={{ marginTop: 10 }}>{memberLoginErr}</div> : null}
 		          </div>
 		        ) : (
@@ -2079,6 +2349,61 @@ async function submitSocioForm() {
 		            <div className="muted" style={{ marginBottom: 8 }}>
 		              {memberCompany ? <b>{memberCompany}</b> : "Tu empresa"} — canal directo con UIC.
 		            </div>
+		            {memberUsingDefault ? (
+		              <div className="alert" style={{ marginBottom: 10 }}>
+		                Estás usando la clave por defecto. <b>Sugerido:</b> cambiá tu clave para mayor seguridad.
+		                <div style={{ marginTop: 8 }}>
+		                  <button className="btnSecondary" type="button" onClick={() => setMemberPwOpen((v) => !v)}>
+		                    {memberPwOpen ? "Cerrar" : "Cambiar clave"}
+		                  </button>
+		                </div>
+		              </div>
+		            ) : (
+		              <div style={{ marginBottom: 10 }}>
+		                <button className="btnSecondary" type="button" onClick={() => setMemberPwOpen((v) => !v)}>
+		                  {memberPwOpen ? "Cerrar" : "Cambiar clave"}
+		                </button>
+		              </div>
+		            )}
+
+		            {memberPwOpen ? (
+		              <div className="cardSub" style={{ marginBottom: 12 }}>
+		                <div className="muted" style={{ marginBottom: 8 }}>
+		                  Cambiar clave (sugerido). La clave queda vigente para tus próximos ingresos.
+		                </div>
+		                <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
+		                  <input
+		                    className="input"
+		                    placeholder="Clave actual"
+		                    type="password"
+		                    value={memberPwOld}
+		                    onChange={(e) => setMemberPwOld(e.target.value)}
+		                    style={{ width: 180 }}
+		                  />
+		                  <input
+		                    className="input"
+		                    placeholder="Nueva clave"
+		                    type="password"
+		                    value={memberPwNew}
+		                    onChange={(e) => setMemberPwNew(e.target.value)}
+		                    style={{ width: 180 }}
+		                  />
+		                  <input
+		                    className="input"
+		                    placeholder="Confirmar"
+		                    type="password"
+		                    value={memberPwNew2}
+		                    onChange={(e) => setMemberPwNew2(e.target.value)}
+		                    style={{ width: 180 }}
+		                  />
+		                  <button className="btnPrimary" type="button" onClick={memberChangePassword}>
+		                    Guardar
+		                  </button>
+		                </div>
+		                {memberPwMsg ? <div className="alert" style={{ marginTop: 10 }}>{memberPwMsg}</div> : null}
+		                {memberPwErr ? <div className="alert" style={{ marginTop: 10 }}>{memberPwErr}</div> : null}
+		              </div>
+		            ) : null}
 		            <div className="messagesWrap">
 		              {(memberMsgs || []).length === 0 ? (
 		                <div className="muted">Todavía no hay mensajes.</div>
@@ -2231,7 +2556,7 @@ async function submitSocioForm() {
                       <button
                         className="btnDanger"
                         onClick={async () => {
-                          const ok = window.confirm(`¿Eliminar al socio ${s.member_no} – ${s.company_name}?`);
+                          const ok = confirmAdminWithKey(`¿Eliminar al socio ${s.member_no} – ${s.company_name}?`);
                           if (!ok) return;
                           await deleteSocio(s.id);
                           await loadSocios({ page: 1, append: false, category: sociosCategory, q: sociosSearchQuery });

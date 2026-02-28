@@ -132,6 +132,9 @@ a{color:inherit}
   min-height:48px;
   font-size:13px;
   line-height:1.1;
+  cursor:pointer;
+  font-family:inherit;
+  appearance:none;
 }
 
 .quickBadge{
