@@ -3,7 +3,7 @@ import "./index.css";
 import logoUIC from "./assets/logo-uic.jpeg";
 
 // Versión visible (footer / ajustes)
-const APP_VERSION = "0.28.5";
+const APP_VERSION = "0.28.6";
 const BUILD_STAMP = (typeof __UIC_BUILD_STAMP__ !== "undefined") ? __UIC_BUILD_STAMP__ : "";
 const PWA_CACHE_ID = (typeof __UIC_CACHE_ID__ !== "undefined") ? __UIC_CACHE_ID__ : "";
 const PWA_COMMIT = (typeof __UIC_COMMIT__ !== "undefined") ? __UIC_COMMIT__ : "";
@@ -157,10 +157,15 @@ export default function App() {
   });
   const [selectedDate, setSelectedDate] = useState(null);
   const [agendaError, setAgendaError] = useState("");
-  // Admin token: se considera "admin" SOLO si el token está guardado (persistido) en el dispositivo.
-  // Evita el bug donde al escribir la primera letra en "Clave admin" cambia de panel automáticamente.
-  const [adminToken, setAdminToken] = useState(() => (localStorage.getItem("uic_admin_token") || "").trim());
-  const [adminDraft, setAdminDraft] = useState(() => (localStorage.getItem("uic_admin_token") || "").trim());
+  // Admin token:
+  // Para evitar que quede "Admin: ACTIVO" persistente (y por seguridad), lo guardamos en sessionStorage.
+  // Además limpiamos tokens viejos que hayan quedado en localStorage por versiones previas.
+  // Evita también el bug donde al escribir la primera letra en "Clave admin" cambia de panel automáticamente.
+  const [adminToken, setAdminToken] = useState(() => {
+    try { localStorage.removeItem("uic_admin_token"); } catch (_) {}
+    return (sessionStorage.getItem("uic_admin_token") || "").trim();
+  });
+  const [adminDraft, setAdminDraft] = useState(() => (sessionStorage.getItem("uic_admin_token") || "").trim());
   useEffect(() => {
     setAdminDraft(adminToken);
   }, [adminToken]);
@@ -217,6 +222,64 @@ const [memberPwOpen, setMemberPwOpen] = useState(false);
   const [planillaOpen, setPlanillaOpen] = useState(false);
   const [sociosCsvText, setSociosCsvText] = useState("");
   const planillaFileRef = useRef(null);
+
+  // =========================
+  // CARGAS (Socios / Mensajes)
+  // =========================
+
+  // Carga listado de socios (paginado) para la pantalla "Socios".
+  // IMPORTANTE: esta función DEBE existir siempre para evitar pantallas azules por "not defined".
+  async function loadSocios(page = 1) {
+    try {
+      setSociosLoading(true);
+      const q = (sociosQuery || "").trim();
+      const params = new URLSearchParams();
+      params.set("page", String(page));
+      params.set("per_page", "50");
+      if (q) params.set("q", q);
+
+      const data = await apiGet(`/socios?${params.toString()}`);
+      const items = Array.isArray(data?.items) ? data.items : [];
+
+      setSocios(items);
+      setSociosPager({
+        page: Number(data?.page || page),
+        per_page: Number(data?.per_page || 50),
+        has_more: Boolean(data?.has_more),
+        next_page: data?.next_page ?? null,
+        total: Number(data?.total || items.length),
+      });
+    } catch (e) {
+      console.error("loadSocios failed", e);
+      setSocios([]);
+      setSociosPager({ page: 1, per_page: 50, has_more: false, next_page: null, total: 0 });
+      throw e;
+    } finally {
+      setSociosLoading(false);
+    }
+  }
+
+  // Carga hilos para el admin. Debe mostrar SOLO hilos con mensajes, ordenados por última actividad.
+  // (El backend ya lo devuelve ordenado desc.)
+  async function loadAdminThreads() {
+    if (!adminToken) {
+      setAdminMsgThreads([]);
+      return;
+    }
+    try {
+      const res = await fetch(`${API_BASE}/admin/messages/threads`, {
+        headers: { "x-admin-token": adminToken },
+      });
+      if (!res.ok) throw new Error(`admin threads http ${res.status}`);
+      const data = await res.json();
+      const items = Array.isArray(data?.threads) ? data.threads : [];
+      setAdminMsgThreads(items);
+    } catch (e) {
+      console.error("loadAdminThreads failed", e);
+      setAdminMsgThreads([]);
+      throw e;
+    }
+  }
 
   // Badge del ícono (si el navegador lo soporta): suma agenda hoy + comunicados no vistos + mensajes no leídos
   useEffect(() => {
@@ -1009,7 +1072,7 @@ async function createEvent(payload) {
         <button
           className="btnSecondary"
           onClick={() => {
-            localStorage.removeItem("uic_admin_token");
+            sessionStorage.removeItem("uic_admin_token");
             setAdminToken("");
             alert("Token eliminado en este dispositivo.");
           }}
@@ -1840,7 +1903,7 @@ async function submitSocioForm() {
                             onClick={() => {
                               const tok = (adminDraft || "").toString().trim();
                               if (!tok) return alert("Ingresá la clave admin.");
-                              localStorage.setItem("uic_admin_token", tok);
+                              sessionStorage.setItem("uic_admin_token", tok);
                               setAdminToken(tok);
                               alert("Token guardado en este dispositivo.");
                             }}
@@ -1884,7 +1947,7 @@ async function submitSocioForm() {
                       onClick={() => {
                         const tok = (adminDraft || "").toString().trim();
                         if (!tok) return alert("Ingresá la clave admin.");
-                        localStorage.setItem("uic_admin_token", tok);
+                        sessionStorage.setItem("uic_admin_token", tok);
                         setAdminToken(tok);
                         alert("Token guardado en este dispositivo.");
                       }}
@@ -1900,7 +1963,7 @@ async function submitSocioForm() {
                     <button
                       className="btnSecondary"
                       onClick={() => {
-                        localStorage.removeItem("uic_admin_token");
+                        sessionStorage.removeItem("uic_admin_token");
                         setAdminToken("");
                         alert("Token eliminado en este dispositivo.");
                       }}
@@ -2711,7 +2774,7 @@ async function submitSocioForm() {
                       onClick={() => {
                         const tok = (adminDraft || "").toString().trim();
                         if (!tok) return alert("Ingresá la clave admin.");
-                        localStorage.setItem("uic_admin_token", tok);
+                        sessionStorage.setItem("uic_admin_token", tok);
                         setAdminToken(tok);
                         alert("Admin ACTIVO en este dispositivo.");
                       }}
@@ -2725,7 +2788,7 @@ async function submitSocioForm() {
                     <button
                       className="btnSecondary"
                       onClick={() => {
-                        localStorage.removeItem("uic_admin_token");
+                        sessionStorage.removeItem("uic_admin_token");
                         setAdminToken("");
                         alert("Admin desactivado en este dispositivo.");
                       }}
