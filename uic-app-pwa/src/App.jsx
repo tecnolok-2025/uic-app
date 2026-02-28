@@ -323,6 +323,184 @@ const [memberPwOpen, setMemberPwOpen] = useState(false);
   const [sociosBulkBusy, setSociosBulkBusy] = useState(false);
   const [sociosBulkMsg, setSociosBulkMsg] = useState("");
 
+  // ===== CSV (admin) helpers (robust: nunca debe romper el render) =====
+  const parseCsvLoose = (csvText) => {
+    // Parser CSV simple con soporte básico de comillas.
+    // Devuelve array de objetos con claves del header.
+    const text = String(csvText || "").replace(/^\uFEFF/, "");
+    const lines = text.split(/\r\n|\n|\r/).filter((l) => String(l).trim().length > 0);
+    if (!lines.length) return [];
+
+    const parseLine = (line) => {
+      const out = [];
+      let cur = "";
+      let inQ = false;
+      for (let i = 0; i < line.length; i++) {
+        const ch = line[i];
+        if (ch === '"') {
+          // dobles comillas dentro de campo
+          if (inQ && line[i + 1] === '"') {
+            cur += '"';
+            i++;
+          } else {
+            inQ = !inQ;
+          }
+          continue;
+        }
+        if (ch === "," && !inQ) {
+          out.push(cur);
+          cur = "";
+          continue;
+        }
+        cur += ch;
+      }
+      out.push(cur);
+      return out.map((s) => String(s ?? "").trim());
+    };
+
+    const header = parseLine(lines[0]).map((h) => String(h || "").trim());
+    const items = [];
+    for (let i = 1; i < lines.length; i++) {
+      const row = parseLine(lines[i]);
+      const obj = {};
+      for (let c = 0; c < header.length; c++) {
+        const k = header[c] || `col_${c}`;
+        obj[k] = row[c] ?? "";
+      }
+      items.push(obj);
+    }
+    return items;
+  };
+
+  // Export CSV
+  const downloadSociosCsv = async () => {
+    try {
+      if (!adminToken) {
+        alert("Primero activá modo administrador y guardá la clave admin.");
+        return;
+      }
+      setSociosCsvBusy(true);
+      const r = await fetch(`${API_BASE}/socios/export.csv`, {
+        headers: { Authorization: `Bearer ${adminToken}` },
+      });
+      if (!r.ok) {
+        const t = await r.text().catch(() => "");
+        throw new Error(t || "No se pudo descargar la planilla.");
+      }
+      const blob = await r.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "uic_socios.csv";
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      alert(`Error al descargar CSV: ${e?.message || e}`);
+    } finally {
+      setSociosCsvBusy(false);
+    }
+  };
+
+  // Import CSV desde archivo
+  const uploadSociosCsv = async () => {
+    try {
+      if (!adminToken) {
+        alert("Primero activá modo administrador y guardá la clave admin.");
+        return;
+      }
+      if (!sociosCsvFile) {
+        alert("Seleccioná un archivo CSV.");
+        return;
+      }
+      setSociosCsvBusy(true);
+      const text = await sociosCsvFile.text();
+      const rows = parseCsvLoose(text);
+      // Mapear campos esperados por /socios/bulk
+      const items = rows
+        .map((r) => ({
+          memberNo: r.member_no ?? r.memberNo ?? r["member_no"] ?? r["N° socio"] ?? r["Nº socio"] ?? r["numero_socio"] ?? "",
+          companyName: r.company_name ?? r.companyName ?? r.empresa ?? r.Empresa ?? "",
+          category: r.category ?? r.categoria ?? "",
+          expertise: r.expertise ?? r.rubro ?? "",
+          websiteUrl: r.website_url ?? r.websiteUrl ?? "",
+          socialUrl: r.social_url ?? r.socialUrl ?? "",
+        }))
+        .filter((it) => String(it.memberNo || "").trim() && String(it.companyName || "").trim());
+
+      if (!items.length) {
+        alert("El CSV no contiene filas válidas (member_no y company_name son requeridos).");
+        return;
+      }
+
+      const r = await fetch(`${API_BASE}/socios/bulk`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${adminToken}`,
+        },
+        body: JSON.stringify({ items }),
+      });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j?.error || "No se pudo importar CSV.");
+      alert(`Importación OK: ${j?.count || items.length} registros.`);
+      try { loadSocios?.(); } catch (_) {}
+    } catch (e) {
+      alert(`Error al importar CSV: ${e?.message || e}`);
+    } finally {
+      setSociosCsvBusy(false);
+    }
+  };
+
+  // Import CSV pegado como texto
+  const uploadSociosCsvText = async () => {
+    try {
+      if (!adminToken) {
+        alert("Primero activá modo administrador y guardá la clave admin.");
+        return;
+      }
+      const text = String(sociosCsvText || "").trim();
+      if (!text) {
+        alert("Pegá el contenido CSV.");
+        return;
+      }
+      setSociosCsvBusy(true);
+      const rows = parseCsvLoose(text);
+      const items = rows
+        .map((r) => ({
+          memberNo: r.member_no ?? r.memberNo ?? "",
+          companyName: r.company_name ?? r.companyName ?? "",
+          category: r.category ?? "",
+          expertise: r.expertise ?? "",
+          websiteUrl: r.website_url ?? r.websiteUrl ?? "",
+          socialUrl: r.social_url ?? r.socialUrl ?? "",
+        }))
+        .filter((it) => String(it.memberNo || "").trim() && String(it.companyName || "").trim());
+
+      if (!items.length) {
+        alert("El CSV pegado no contiene filas válidas.");
+        return;
+      }
+      const r = await fetch(`${API_BASE}/socios/bulk`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${adminToken}`,
+        },
+        body: JSON.stringify({ items }),
+      });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j?.error || "No se pudo importar CSV.");
+      alert(`Importación OK: ${j?.count || items.length} registros.`);
+      try { loadSocios?.(); } catch (_) {}
+    } catch (e) {
+      alert(`Error al importar CSV: ${e?.message || e}`);
+    } finally {
+      setSociosCsvBusy(false);
+    }
+  };
+
 
 const [socioForm, setSocioForm] = useState({
   member_no: "",
