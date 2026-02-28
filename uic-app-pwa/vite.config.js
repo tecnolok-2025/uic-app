@@ -4,7 +4,7 @@ import { VitePWA } from "vite-plugin-pwa";
 
 // v0.28.3: endurecemos el update de PWA para evitar "pantalla azul" por SW viejo
 // sirviendo index.html con assets que ya no existen (hash cambiado).
-const CACHE_ID = "uic-campana-v0283";
+const CACHE_ID = "uic-campana-v0285";
 // Render suele exponer el commit como RENDER_GIT_COMMIT. Si no existe, dejamos vacío.
 const COMMIT = process.env.RENDER_GIT_COMMIT || process.env.GITHUB_SHA || process.env.COMMIT_SHA || "";
 
@@ -40,8 +40,8 @@ export default defineConfig({
         background_color: "#0b2a4a",
         display: "standalone",
         // start_url versionado para que iOS trate la instalación como nueva
-        id: "/?v=0.28.3",
-        start_url: "/?v=0.28.3",
+        id: "/?v=0.28.5",
+        start_url: "/?v=0.28.5",
         scope: "/",
         icons: [
           { src: "/icons/icon-192.png", sizes: "192x192", type: "image/png" },

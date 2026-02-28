@@ -3,7 +3,7 @@ import "./index.css";
 import logoUIC from "./assets/logo-uic.jpeg";
 
 // Versión visible (footer / ajustes)
-const APP_VERSION = "UIC App v0.28.3";
+const APP_VERSION = "0.28.5";
 const BUILD_STAMP = (typeof __UIC_BUILD_STAMP__ !== "undefined") ? __UIC_BUILD_STAMP__ : "";
 const PWA_CACHE_ID = (typeof __UIC_CACHE_ID__ !== "undefined") ? __UIC_CACHE_ID__ : "";
 const PWA_COMMIT = (typeof __UIC_COMMIT__ !== "undefined") ? __UIC_COMMIT__ : "";
@@ -103,32 +103,24 @@ async function tryShowLocalNotification() {
 async function hardRefreshWithBadge(onStart) {
   try {
     if (typeof onStart === "function") onStart();
-  } catch (_) {}
-  // Restablecer (borrar SW + cache)
-  try {
+    // 1) Service workers
     if ("serviceWorker" in navigator) {
       const regs = await navigator.serviceWorker.getRegistrations();
       await Promise.all(regs.map((r) => r.unregister()));
     }
-    if ("caches" in window) {
+    // 2) Caches (si está disponible)
+    if (typeof caches !== "undefined") {
       const keys = await caches.keys();
       await Promise.all(keys.map((k) => caches.delete(k)));
     }
-  } catch (_) {
-    // ignore
-  }
-
-  // 3) No forzamos un badge por "forzar actualización" (evita falsos avisos)
-  // (los badges reales se calculan en base a Agenda/Comunicaciones)
-
-  // 4) Recargar (con query versionada para cache-bust fuerte)
-  try {
-    const u = new URL(window.location.href);
-    u.searchParams.set("v", "0.28.3");
-    u.searchParams.set("ts", String(Date.now()));
-    window.location.href = u.toString();
-  } catch (_) {
-    window.location.reload();
+  } catch (e) {
+    console.warn("hardRefreshWithBadge: ignore cleanup error", e);
+  } finally {
+    // Cache-buster robusto (evita quedarse "pegado" en Actualizando...)
+    const url = new URL(window.location.href);
+    url.searchParams.set("v", String(PWA_CACHE_ID || Date.now()));
+    url.searchParams.set("t", String(Date.now()));
+    window.location.replace(url.toString());
   }
 }
 
@@ -452,6 +444,37 @@ const [memberPwOpen, setMemberPwOpen] = useState(false);
       setSociosCsvBusy(false);
     }
   };
+
+  // Abrir grilla de socios (post-import o acceso directo) de forma segura:
+  // - Evita ReferenceError en dispositivos (Safari/iOS) si la función no existía.
+  // - Carga hasta ~2000 socios (10 páginas x 200) para el caso real (hoy ~93; objetivo ~200).
+  const openSociosGrid = async () => {
+    try {
+      setTab("socios");
+      setSociosGridOpen(true);
+      setSociosGridError("");
+      setSociosGridLoading(true);
+
+      const perPage = 200;
+      const maxPages = 10;
+      let page = 1;
+      let all = [];
+      while (page <= maxPages) {
+        const r = await apiGet(`/socios?page=${page}&per_page=${perPage}`);
+        const items = Array.isArray(r?.items) ? r.items : [];
+        all = all.concat(items);
+        if (items.length < perPage) break;
+        page += 1;
+      }
+      setSociosGridItems(all);
+    } catch (e) {
+      console.error("openSociosGrid failed:", e);
+      setSociosGridError("No se pudo cargar la grilla de socios. Reintentá.");
+    } finally {
+      setSociosGridLoading(false);
+    }
+  };
+
 
   // Import CSV pegado como texto
   const uploadSociosCsvText = async () => {
@@ -2664,7 +2687,7 @@ async function submitSocioForm() {
                 <b>iPhone (PWA):</b> para “instalar” la app, abrí en Safari → Compartir → <i>Agregar a inicio</i>.
               </div>
               <div style={{ marginTop: 12 }}>
-                <button className="btnPrimary" onClick={() => hardRefreshWithBadge(() => setRefreshing(true))}>Forzar actualización</button>
+                <button className="btnPrimary" onClick={async () => { setRefreshing(true); try { await hardRefreshWithBadge(); } finally { setTimeout(() => setRefreshing(false), 8000); } }}>Forzar actualización</button>
                 <div className="muted" style={{ marginTop: 6, fontSize: 12 }}>
                   Si el celular no toma cambios, este botón intenta borrar cache y service worker y recargar.
                 </div>

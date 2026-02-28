@@ -3,6 +3,7 @@ import ReactDOM from "react-dom/client";
 import App from "./App.jsx";
 import "./index.css";
 
+const APP_VERSION = "0.28.5";
 // PWA: registro explícito para updates más confiables.
 // Evita el caso típico de "pantalla azul" cuando un Service Worker viejo
 // sirve un index.html que apunta a assets (hash) que ya no existen.
@@ -67,7 +68,7 @@ function showFatal(e) {
       } catch (err) {
         console.warn(err);
       }
-      window.location.href = `/?v=0.28.3&t=${Date.now()}`;
+      window.location.href = `/?v=${APP_VERSION}&t=${Date.now()}`;
     });
   }, 0);
 }
