@@ -3,7 +3,7 @@ import "./index.css";
 import logoUIC from "./assets/logo-uic.jpeg";
 
 // Versión visible (footer / ajustes)
-const APP_VERSION = "0.30.2";
+const APP_VERSION = "0.30.3";
 const BUILD_STAMP = (typeof __UIC_BUILD_STAMP__ !== "undefined") ? __UIC_BUILD_STAMP__ : "";
 const PWA_CACHE_ID = (typeof __UIC_CACHE_ID__ !== "undefined") ? __UIC_CACHE_ID__ : "";
 const PWA_COMMIT = (typeof __UIC_COMMIT__ !== "undefined") ? __UIC_COMMIT__ : "";
@@ -140,6 +140,83 @@ export default function App() {
     return c;
   };
   const [tab, setTab] = useState("inicio"); // inicio | publicaciones | beneficios | agenda | comunicacion | ajustes
+
+  // Zoom lock (evita zoom por pellizco y el auto-zoom al escribir en iOS).
+  // Se guarda por dispositivo.
+  const ZOOM_LOCK_KEY = "uic_zoom_locked_v1";
+  const [zoomLocked, setZoomLocked] = useState(() => {
+    try {
+      return localStorage.getItem(ZOOM_LOCK_KEY) === "1";
+    } catch (_) {
+      return false;
+    }
+  });
+  const [zoomToast, setZoomToast] = useState("");
+  const zoomToastTimerRef = useRef(null);
+  const viewportOrigRef = useRef(null);
+  const zoomLockedRef = useRef(zoomLocked);
+
+  useEffect(() => {
+    zoomLockedRef.current = zoomLocked;
+  }, [zoomLocked]);
+
+  const flashZoomToast = (msg) => {
+    try {
+      if (zoomToastTimerRef.current) clearTimeout(zoomToastTimerRef.current);
+    } catch (_) {}
+    setZoomToast(msg);
+    zoomToastTimerRef.current = setTimeout(() => setZoomToast(""), 1600);
+  };
+
+  // Aplica meta viewport + clase CSS (para evitar zoom al tipear en iOS).
+  useEffect(() => {
+    try {
+      localStorage.setItem(ZOOM_LOCK_KEY, zoomLocked ? "1" : "0");
+    } catch (_) {}
+
+    try {
+      const meta = document.querySelector('meta[name="viewport"]');
+      if (meta) {
+        if (viewportOrigRef.current == null) viewportOrigRef.current = meta.getAttribute("content") || "";
+        if (zoomLocked) {
+          meta.setAttribute(
+            "content",
+            "width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"
+          );
+        } else {
+          meta.setAttribute("content", viewportOrigRef.current || "width=device-width, initial-scale=1.0");
+        }
+      }
+    } catch (_) {}
+
+    try {
+      document.documentElement.classList.toggle("uicZoomLocked", !!zoomLocked);
+      document.body.classList.toggle("uicZoomLocked", !!zoomLocked);
+    } catch (_) {}
+  }, [zoomLocked]);
+
+  // Bloquea el gesto de zoom (pinch) en iOS y el zoom por Ctrl+Wheel en desktop.
+  // (El auto-zoom al enfocar inputs se evita con CSS cuando está activo.)
+  useEffect(() => {
+    const onGesture = (e) => {
+      if (zoomLockedRef.current) e.preventDefault();
+    };
+    document.addEventListener("gesturestart", onGesture, { passive: false });
+    document.addEventListener("gesturechange", onGesture, { passive: false });
+    document.addEventListener("gestureend", onGesture, { passive: false });
+
+    const onWheel = (e) => {
+      if (zoomLockedRef.current && (e.ctrlKey || e.metaKey)) e.preventDefault();
+    };
+    window.addEventListener("wheel", onWheel, { passive: false });
+
+    return () => {
+      document.removeEventListener("gesturestart", onGesture);
+      document.removeEventListener("gesturechange", onGesture);
+      document.removeEventListener("gestureend", onGesture);
+      window.removeEventListener("wheel", onWheel);
+    };
+  }, []);
 
   const [posts, setPosts] = useState([]);
   const [postsPager, setPostsPager] = useState({ page: 1, per_page: 6, limit_total: 100, has_more: false });
@@ -3007,6 +3084,30 @@ async function submitSocioForm() {
             <div className="muted">
               <div>Versión: {APP_VERSION}</div><div style={{ marginTop: 12 }}>
                 <button className="btnPrimary" onClick={async () => { setRefreshing(true); try { await hardRefreshWithBadge(); } finally { setTimeout(() => setRefreshing(false), 8000); } }}>Forzar actualización</button></div>
+
+              <div style={{ marginTop: 12 }}>
+                <button
+                  className="btnSecondary"
+                  onClick={() => {
+                    setZoomLocked((v) => {
+                      const nv = !v;
+                      flashZoomToast(nv ? "Zoom bloqueado." : "Zoom desbloqueado.");
+                      return nv;
+                    });
+                  }}
+                >
+                  {zoomLocked ? "Desbloquear zoom" : "Bloquear zoom"}
+                </button>
+                <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>
+                  Evita que la pantalla se agrande al escribir o al pellizcar.
+                </div>
+
+                {zoomToast ? (
+                  <div className="toast" style={{ marginTop: 10 }}>
+                    <div className="toastText">{zoomToast}</div>
+                  </div>
+                ) : null}
+              </div>
 
               <div style={{ marginTop: 18 }}>
                 <div style={{ fontWeight: 700, marginBottom: 6 }}>Administrador – Adecuación de datos del socio</div>

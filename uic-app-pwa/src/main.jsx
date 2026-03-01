@@ -3,7 +3,7 @@ import ReactDOM from "react-dom/client";
 import App from "./App.jsx";
 import "./index.css";
 
-const APP_VERSION = "0.30.2";
+const APP_VERSION = "0.30.3";
 
 // Seguridad/UX: por defecto NO dejamos el modo admin "pegado" entre sesiones.
 // El admin deberá reingresar la clave en Ajustes (evita que aparezca 'Admin ACTIVO' sin querer).
