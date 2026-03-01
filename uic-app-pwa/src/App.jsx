@@ -3,12 +3,345 @@ import "./index.css";
 import logoUIC from "./assets/logo-uic.jpeg";
 
 // Versión visible (footer / ajustes)
-const APP_VERSION = "0.31.0";
+const APP_VERSION = "0.31.1";
 const BUILD_STAMP = (typeof __UIC_BUILD_STAMP__ !== "undefined") ? __UIC_BUILD_STAMP__ : "";
 const PWA_CACHE_ID = (typeof __UIC_CACHE_ID__ !== "undefined") ? __UIC_CACHE_ID__ : "";
 const PWA_COMMIT = (typeof __UIC_COMMIT__ !== "undefined") ? __UIC_COMMIT__ : "";
 
 const API_BASE = import.meta.env.VITE_API_BASE || ""; // ej: https://uic-campana-api.onrender.com
+
+// ---------------- Bolsa de Trabajo — catálogos (v0.31.x) ----------------
+// Nota: las claves (value) son estables; los textos (label) se pueden ajustar sin romper datos.
+const BT_AREAS = [
+  { value: "electrica", label: "Eléctrica (Industrial)" },
+  { value: "mecanica", label: "Mecánica (Industrial)" },
+  { value: "operaciones", label: "Operaciones de planta y producción" },
+  { value: "mantenimiento_general", label: "Mantenimiento industrial (general)" },
+  { value: "soldadura_montaje", label: "Soldadura, cañerías y montaje" },
+  { value: "caldereria", label: "Calderería y recipientes" },
+  { value: "climatizacion", label: "Climatización / Refrigeración industrial" },
+  { value: "mecanizado", label: "Mecanizado y fabricación (taller)" },
+  { value: "instrumentacion", label: "Instrumentación, control y automatización (I&C)" },
+  { value: "obra_civil", label: "Construcción y obra civil industrial" },
+  { value: "oficina_tecnica", label: "Proyectista / Oficina técnica / CAD-BIM" },
+  { value: "calculista", label: "Calculista / Ingeniería de detalle" },
+  { value: "supervision", label: "Supervisión / Capataz / Jefaturas operativas" },
+  { value: "planificacion", label: "Planificación y control (Planificador / Programación / Control de costos)" },
+  { value: "calidad_end", label: "Calidad e inspección (QA/QC – END)" },
+  { value: "hse", label: "Seguridad, higiene y ambiente (HSE)" },
+  { value: "logistica", label: "Logística, depósito y abastecimiento" },
+  { value: "administrativo", label: "Administrativo / RR.HH. / Finanzas / Comercial" },
+  { value: "sustentabilidad", label: "Sustentabilidad y Medio ambiente" },
+];
+
+const BT_NIVEL = [
+  "Ayudante / Auxiliar",
+  "Medio oficial",
+  "Oficial",
+  "Oficial especializado / Senior",
+  "Técnico",
+  "Supervisor",
+];
+
+const BT_RANGO_EXP = ["0–1", "2–5", "6–10", "11–20", "21–30", "31+"];
+
+const BT_NIVEL_EDU = ["Primaria", "Secundaria", "Terciaria", "Universitaria", "Otros"];
+
+const BT_ESTADO_CIVIL = ["Soltero/a", "Casado/a", "Unión convivencial", "Divorciado/a", "Viudo/a", "Prefiere no decir"];
+
+// Especialidades por área (catálogo inicial). Incluye “Otros” al final.
+// Nota: la búsqueda se hace por texto normalizado, y tolera sinónimos (ver BT_SYNONYMS).
+const BT_SPECIALTIES = {
+  electrica: [
+    "Electricista industrial",
+    "Electricista de montaje",
+    "Técnico electricista",
+    "Mantenimiento eléctrico",
+    "Tablerista / Armado de tableros",
+    "Cableador / Tendido de cables",
+    "Montador de bandejas y canalizaciones",
+    "Conexión de motores / arrancadores",
+    "Variadores de velocidad / soft starters",
+    "Bobinador / Rebobinador de motores",
+    "Instrumentación eléctrica (sensores/mediciones eléctricas)",
+    "Media tensión (celdas / subestaciones)",
+    "Protecciones eléctricas / relés",
+    "Puesta a tierra / pararrayos",
+    "Mediciones (megger, pinza, termografía)",
+    "Generadores / grupos electrógenos",
+    "UPS / energía crítica",
+    "Iluminación industrial",
+    "Comisionamiento eléctrico",
+    "Otros",
+  ],
+  mecanica: [
+    "Mecánico industrial",
+    "Mecánico de montaje",
+    "Técnico mecánico",
+    "Mantenimiento mecánico",
+    "Ajustador mecánico",
+    "Montador mecánico",
+    "Mecánico de bombas",
+    "Mecánico de compresores",
+    "Mecánico de turbinas / equipos rotantes",
+    "Mecánico de válvulas (mantenimiento)",
+    "Reductores / transmisiones",
+    "Alineación láser",
+    "Balanceo / vibraciones (básico)",
+    "Lubricación / tribología",
+    "Hidráulica industrial",
+    "Neumática industrial",
+    "Rodamientos / sellos mecánicos",
+    "Mantenimiento de calderas (mecánico)",
+    "Mecánico automotor (flota/industria)",
+    "Otros",
+  ],
+  operaciones: [
+    "Operador de planta",
+    "Operador de producción",
+    "Operador de sala de control (DCS/SCADA)",
+    "Operador de campo",
+    "Operador de refinería / petroquímica",
+    "Operador de gas / compresión",
+    "Operador de separación / tratamiento",
+    "Operador de utilities (aire, agua, vapor)",
+    "Operador de calderas",
+    "Operador de tratamiento de agua",
+    "Operador de efluentes",
+    "Operador de cargas y descargas (terminal)",
+    "Operador de bombas / estaciones",
+    "Roustabout / Peón de campo (Oil & Gas)",
+    "Floorhand / Roughneck (Oil & Gas)",
+    "Operador de fractura (Oil & Gas)",
+    "Operador de coiled tubing (Oil & Gas)",
+    "Operador de wireline (Oil & Gas)",
+    "Otros",
+  ],
+  mantenimiento_general: [
+    "Técnico de mantenimiento",
+    "Mantenimiento preventivo",
+    "Mantenimiento correctivo",
+    "Mantenimiento predictivo",
+    "Mantenimiento edilicio industrial",
+    "Mantenedor general",
+    "Lubricador",
+    "Auxiliar de mantenimiento",
+    "Mantenimiento de bombas y válvulas",
+    "Mantenimiento de transportadores",
+    "Mantenimiento de equipos estáticos",
+    "Paradas de planta (mantenimiento)",
+    "Otros",
+  ],
+  soldadura_montaje: [
+    "Soldador SMAW (electrodo)",
+    "Soldador GTAW/TIG",
+    "Soldador GMAW/MIG-MAG",
+    "Soldador FCAW (alambre tubular)",
+    "Soldador 6G (cañería)",
+    "Soldador calificado (ASME/API)",
+    "Ayudante de soldador",
+    "Punteador",
+    "Esmerilador / amolador",
+    "Biselador",
+    "Cañista (piping)",
+    "Tubero / Instalador de cañerías",
+    "Montajista / armador",
+    "Prefabricación / spooling",
+    "Bridador / juntista",
+    "Aislación y calorifugado (piping)",
+    "Montaje de estructuras",
+    "Otros",
+  ],
+  caldereria: [
+    "Calderero",
+    "Armador de recipientes",
+    "Armador de tanques",
+    "Trazador / marcador",
+    "Plegador",
+    "Guillotinero",
+    "Rolador (cilindradora)",
+    "Oxicortista / plasma",
+    "Soldador para calderería",
+    "Fabricación de ductos",
+    "Montaje de recipientes a presión",
+    "Otros",
+  ],
+  climatizacion: [
+    "Técnico frigorista",
+    "Técnico en refrigeración industrial",
+    "HVAC industrial (aire/ventilación)",
+    "Instalador de equipos (industrial)",
+    "Mantenimiento de chillers",
+    "Mantenimiento de cámaras frigoríficas",
+    "Torres de enfriamiento (mantenimiento)",
+    "Aire comprimido (secadores/aire)",
+    "Otros",
+  ],
+  mecanizado: [
+    "Tornero",
+    "Fresador",
+    "Rectificador",
+    "Alesador",
+    "Operador CNC (torno)",
+    "Operador CNC (fresa/centro)",
+    "Programador CNC",
+    "Metrología / control dimensional (taller)",
+    "Afilador de herramientas",
+    "Matricero",
+    "Herramentista",
+    "Ajustador / armado de piezas",
+    "Soldadura y reparación de piezas (taller)",
+    "Otros",
+  ],
+  instrumentacion: [
+    "Instrumentista",
+    "Técnico I&C",
+    "Calibración de instrumentos",
+    "Montaje de instrumentos (campo)",
+    "Montaje de tubing / conexiones",
+    "Válvulas de control / posicionadores",
+    "Analizadores de proceso",
+    "Lazos de control (pruebas)",
+    "PLC (soporte/puesta en marcha)",
+    "DCS / sala de control (soporte)",
+    "SCADA (soporte)",
+    "Comisionamiento I&C",
+    "Otros",
+  ],
+  obra_civil: [
+    "Albañil industrial",
+    "Oficial de construcción",
+    "Encofrador",
+    "Armador de hierro (fierrero)",
+    "Hormigonero / terminaciones",
+    "Colocador de pisos industriales",
+    "Pintor (obra)",
+    "Aislamiento / impermeabilización",
+    "Topografía (auxiliar)",
+    "Maestro mayor de obras",
+    "Otros",
+  ],
+  oficina_tecnica: [
+    "Dibujante técnico",
+    "Proyectista mecánico",
+    "Proyectista eléctrico",
+    "Proyectista piping",
+    "Proyectista civil",
+    "BIM Modeler",
+    "Modelador 3D (CAD)",
+    "Document control",
+    "Metrados / cómputos",
+    "Planillero",
+    "Otros",
+  ],
+  calculista: [
+    "Calculista de estructuras metálicas",
+    "Calculista civil (hormigón)",
+    "Cálculo de piping (stress analysis)",
+    "Cálculo de recipientes / ASME",
+    "Cálculo de intercambiadores",
+    "Cálculo eléctrico (cortocircuito/selectividad)",
+    "Cálculo de iluminación",
+    "Memorias de cálculo",
+    "Otros",
+  ],
+  supervision: [
+    "Supervisor de obra",
+    "Capataz",
+    "Jefe de turno",
+    "Supervisor de mantenimiento",
+    "Supervisor de montaje",
+    "Supervisor de piping",
+    "Supervisor eléctrico",
+    "Supervisor mecánico",
+    "Supervisor I&C",
+    "Supervisor QA/QC",
+    "Otros",
+  ],
+  planificacion: [
+    "Planificador de mantenimiento",
+    "Programador (Scheduler)",
+    "Planner de obra",
+    "Control de costos",
+    "Planificación de paradas de planta",
+    "Gestión de materiales (planning)",
+    "Reporting / KPIs (proyectos)",
+    "Otros",
+  ],
+  calidad_end: [
+    "Inspector QC",
+    "Aseguramiento de calidad (QA)",
+    "Inspector de soldadura",
+    "Inspector de piping",
+    "Inspector de pintura / recubrimientos",
+    "Inspector dimensional",
+    "Inspector END – VT (visual)",
+    "END – PT (líquidos penetrantes)",
+    "END – MT (partículas magnéticas)",
+    "END – UT (ultrasonido)",
+    "END – RT (radiografía)",
+    "END – PMI / dureza",
+    "Laboratorio (ensayos)",
+    "Documentación de calidad",
+    "Otros",
+  ],
+  hse: [
+    "Técnico en seguridad e higiene",
+    "Supervisor HSE",
+    "Permisos de trabajo / LOTO",
+    "Investigación de incidentes",
+    "Auditor ISO 45001",
+    "Gestión de riesgos",
+    "Brigadista / respuesta a emergencias",
+    "Medio ambiente (HSE)",
+    "Otros",
+  ],
+  logistica: [
+    "Operador de autoelevador",
+    "Pañolero",
+    "Depósito / almacén",
+    "Picker / preparación de pedidos",
+    "Recepción y despacho",
+    "Abastecimiento / compras",
+    "Chofer (camión/utilitario)",
+    "Logística interna",
+    "Control de inventario",
+    "Otros",
+  ],
+  administrativo: [
+    "Administrativo/a",
+    "Asistente de RR.HH.",
+    "Liquidación de sueldos",
+    "Contable",
+    "Tesorería",
+    "Facturación",
+    "Compras / procurement",
+    "Comercial / ventas",
+    "Atención al cliente",
+    "Administración de contratos",
+    "Otros",
+  ],
+  sustentabilidad: [
+    "Gestión ambiental",
+    "Analista de sustentabilidad / ESG",
+    "Gestión de residuos",
+    "Gestión de energía / eficiencia",
+    "Huella de carbono (GHG)",
+    "ISO 14001 / auditorías",
+    "Monitoreo ambiental",
+    "Relación con comunidad",
+    "Otros",
+  ],
+};
+
+const BT_SYNONYMS = {
+  // Soldadura / piping
+  "instalador de cañerias": "Cañista (piping)",
+  "canista": "Cañista (piping)",
+  "tubero": "Tubero / Instalador de cañerías",
+  "end": "END – Ultrasonido (UT)", // ejemplo
+  "qaqc": "Inspector QC",
+};
 
 function cls(...xs) {
   return xs.filter(Boolean).join(" ");
@@ -141,12 +474,153 @@ export default function App() {
   };
   const [tab, setTab] = useState("inicio"); // inicio | publicaciones | proindustrial | manual | beneficios | agenda | bolsa | comunicacion | mensajes | socios | ajustes
 
+  // ---------------- Bolsa de Trabajo (MVP v0.31.x) ----------------
+  const BT_DRAFT_KEY = "uic_bt_candidate_draft_v1";
+  const btEmpty = useMemo(() => ({
+    nombre: "",
+    apellido: "",
+    dni: "",
+    nacionalidad: "",
+    estado_civil: "",
+    telefono: "",
+    correo: "",
+    localidad: "",
+    direccion: "",
+    area_trabajo: "",
+    nivel: "",
+    especialidad: "",
+    especialidad_otro: "",
+    rango_experiencia: "",
+    nivel_educativo: "",
+    tiene_capacitacion: "", // "si" | "no"
+    trabaja_actualmente: "", // "si" | "no"
+    sueldo_pretendido: "",
+    ultimo_trabajo: "",
+    observaciones: "",
+  }), []);
+
+  const [bt, setBt] = useState(() => {
+    try {
+      const raw = localStorage.getItem(BT_DRAFT_KEY);
+      if (!raw) return btEmpty;
+      const obj = JSON.parse(raw);
+      return { ...btEmpty, ...(obj || {}) };
+    } catch (_) {
+      return btEmpty;
+    }
+  });
+
+  const [btErrors, setBtErrors] = useState({});
+  const [btToast2, setBtToast2] = useState("");
+  const [btSpecQuery, setBtSpecQuery] = useState("");
+
+  const btNeedsNivel = bt.area_trabajo === "electrica" || bt.area_trabajo === "mecanica";
+  const btSpecOptions = useMemo(() => {
+    const opts = BT_SPECIALTIES?.[bt.area_trabajo] || [];
+    return Array.isArray(opts) ? opts : [];
+  }, [bt.area_trabajo]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(BT_DRAFT_KEY, JSON.stringify(bt));
+    } catch (_) {}
+  }, [bt]);
+
+  const btSet = (k, v) => setBt((prev) => ({ ...prev, [k]: v }));
+
+  const btResetCascade = () => {
+    setBt((prev) => ({ ...prev, nivel: "", especialidad: "", especialidad_otro: "" }));
+    setBtSpecQuery("");
+  };
+
+  const btSelectArea = (v) => {
+    setBt((prev) => ({ ...prev, area_trabajo: v, nivel: "", especialidad: "", especialidad_otro: "" }));
+    setBtSpecQuery("");
+  };
+
+  const btPickSpecialty = (label) => {
+    btSet("especialidad", label);
+    if (label !== "Otros") btSet("especialidad_otro", "");
+  };
+
+  const btNormalized = (s) => normStr(String(s || ""));
+
+  const btValidate = () => {
+    const e = {};
+    const dni = String(bt.dni || "").trim();
+    const tel = String(bt.telefono || "").trim();
+    const mail = String(bt.correo || "").trim();
+    const obs = String(bt.observaciones || "");
+    const ult = String(bt.ultimo_trabajo || "");
+
+    const must = (k, msg) => {
+      if (!String(bt[k] || "").trim()) e[k] = msg;
+    };
+
+    must("nombre", "Requerido");
+    must("apellido", "Requerido");
+    must("dni", "Requerido");
+    must("telefono", "Requerido");
+    must("correo", "Requerido");
+    must("localidad", "Requerido");
+    must("area_trabajo", "Requerido");
+    must("especialidad", "Requerido");
+    must("rango_experiencia", "Requerido");
+    must("nivel_educativo", "Requerido");
+    must("tiene_capacitacion", "Requerido");
+    must("trabaja_actualmente", "Requerido");
+
+    if (btNeedsNivel) must("nivel", "Requerido");
+
+    if (dni && !/^\d{7,9}$/.test(dni)) e.dni = "DNI inválido (7–9 dígitos)";
+    if (mail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(mail)) e.correo = "Correo inválido";
+    if (bt.sueldo_pretendido && !/^\d+$/.test(String(bt.sueldo_pretendido).trim())) e.sueldo_pretendido = "Solo números";
+    if (obs && obs.length > 300) e.observaciones = "Máx 300 caracteres";
+    if (ult && ult.length > 80) e.ultimo_trabajo = "Máx 80 caracteres";
+
+    if (bt.especialidad === "Otros") {
+      const o = String(bt.especialidad_otro || "").trim();
+      if (o.length < 3 || o.length > 60) e.especialidad_otro = "Especificá 3–60 caracteres";
+    }
+
+    return e;
+  };
+
+  const btSubmitDraft = () => {
+    const e = btValidate();
+    setBtErrors(e);
+    if (Object.keys(e).length) {
+      setBtToast2("Revisá los campos marcados en rojo.");
+      setTimeout(() => setBtToast2(""), 1800);
+      return;
+    }
+    setBtToast2("Perfil guardado.");
+    setTimeout(() => setBtToast2(""), 1800);
+  };
+
+  const btFilteredSpecs = useMemo(() => {
+    const q = btNormalized(btSpecQuery);
+    const opts = btSpecOptions || [];
+    if (!q) return opts.slice(0, 24);
+    const syn = BT_SYNONYMS?.[q];
+    if (syn) {
+      // Si el buscador matchea un sinónimo exacto, lo subimos arriba
+      const unique = [syn, ...opts.filter((x) => x !== syn)];
+      return unique.slice(0, 24);
+    }
+    return opts
+      .filter((x) => btNormalized(x).includes(q))
+      .slice(0, 24);
+  }, [btSpecOptions, btSpecQuery]);
+
   // Zoom lock (evita zoom por pellizco y el auto-zoom al escribir en iOS).
   // Se guarda por dispositivo.
   const ZOOM_LOCK_KEY = "uic_zoom_locked_v1";
   const [zoomLocked, setZoomLocked] = useState(() => {
     try {
-      return localStorage.getItem(ZOOM_LOCK_KEY) === "1";
+      const v = localStorage.getItem(ZOOM_LOCK_KEY);
+      if (v == null) return true; // por defecto bloqueado
+      return v === "1";
     } catch (_) {
       return false;
     }
@@ -1157,7 +1631,7 @@ const quickLinks = [
   { key: "socios", label: "Socios", href: "#", onClick: () => { setTab("socios"); } },
 
   // Protegido por clave (socio o admin)
-  { key: "req_institucionales", label: "Requerimientos inst.", href: "#", onClick: () => openReqGate() },
+  { key: "req_institucionales", label: "Requerimientos institucionales", href: "#", onClick: () => openReqGate() },
 
   { key: "mensajes_admin", label: "Comunicación al administrador", href: "#", onClick: () => { setTab("mensajes"); }, badge: (msgsUnseen || 0) },
   { key: "sitio_uic", label: "Sitio UIC", href: "https://uic-campana.com.ar/" },
@@ -2123,11 +2597,220 @@ async function submitSocioForm() {
   <section className="card">
     <div className="cardTitle">Bolsa de Trabajo</div>
     <div className="muted" style={{ marginTop: 6 }}>
-      Módulo en desarrollo. En esta etapa dejamos el acceso creado y el lugar reservado.
+      Alta de candidato (MVP). La idea es que escribas lo menos posible: desplegables + sí/no.
     </div>
-    <div className="alert" style={{ marginTop: 10 }}>
-      Próximo paso: categorías laborales + carga de perfiles + filtros (según tu definición).
+
+    <details className="acc" open>
+      <summary className="accSum">1) Datos personales</summary>
+      <div className="accBody">
+        <div className="grid2">
+          <div>
+            <div className="fieldLabel">Nombre *</div>
+            <input className={cls("input", btErrors.nombre && "inputError")} value={bt.nombre} onChange={(e) => btSet("nombre", e.target.value)} />
+          </div>
+          <div>
+            <div className="fieldLabel">Apellido *</div>
+            <input className={cls("input", btErrors.apellido && "inputError")} value={bt.apellido} onChange={(e) => btSet("apellido", e.target.value)} />
+          </div>
+          <div>
+            <div className="fieldLabel">DNI *</div>
+            <input className={cls("input", btErrors.dni && "inputError")} value={bt.dni} onChange={(e) => btSet("dni", e.target.value.replace(/\D/g, ""))} inputMode="numeric" />
+          </div>
+          <div>
+            <div className="fieldLabel">Nacionalidad</div>
+            <input className="input" value={bt.nacionalidad} onChange={(e) => btSet("nacionalidad", e.target.value)} placeholder="(opcional)" />
+          </div>
+          <div>
+            <div className="fieldLabel">Estado civil</div>
+            <select className="input" value={bt.estado_civil} onChange={(e) => btSet("estado_civil", e.target.value)}>
+              <option value="">(opcional)</option>
+              {BT_ESTADO_CIVIL.map((x) => <option key={x} value={x}>{x}</option>)}
+            </select>
+          </div>
+        </div>
+      </div>
+    </details>
+
+    <details className="acc">
+      <summary className="accSum">2) Contacto y ubicación</summary>
+      <div className="accBody">
+        <div className="grid2">
+          <div>
+            <div className="fieldLabel">Teléfono *</div>
+            <input className={cls("input", btErrors.telefono && "inputError")} value={bt.telefono} onChange={(e) => btSet("telefono", e.target.value)} inputMode="tel" />
+          </div>
+          <div>
+            <div className="fieldLabel">Correo electrónico *</div>
+            <input className={cls("input", btErrors.correo && "inputError")} value={bt.correo} onChange={(e) => btSet("correo", e.target.value)} inputMode="email" />
+          </div>
+          <div>
+            <div className="fieldLabel">Localidad *</div>
+            <input className={cls("input", btErrors.localidad && "inputError")} value={bt.localidad} onChange={(e) => btSet("localidad", e.target.value)} placeholder="Ej: Campana" />
+          </div>
+          <div>
+            <div className="fieldLabel">Dirección</div>
+            <input className="input" value={bt.direccion} onChange={(e) => btSet("direccion", e.target.value)} placeholder="(opcional)" />
+          </div>
+        </div>
+      </div>
+    </details>
+
+    <details className="acc">
+      <summary className="accSum">3) Perfil laboral (cascada)</summary>
+      <div className="accBody">
+        <div className="grid2">
+          <div>
+            <div className="fieldLabel">Área de trabajo / Rubro *</div>
+            <select className={cls("input", btErrors.area_trabajo && "inputError")} value={bt.area_trabajo} onChange={(e) => btSelectArea(e.target.value)}>
+              <option value="">Seleccionar…</option>
+              {BT_AREAS.map((a) => <option key={a.value} value={a.value}>{a.label}</option>)}
+            </select>
+          </div>
+
+          {btNeedsNivel ? (
+            <div>
+              <div className="fieldLabel">Nivel *</div>
+              <select className={cls("input", btErrors.nivel && "inputError")} value={bt.nivel} onChange={(e) => btSet("nivel", e.target.value)}>
+                <option value="">Seleccionar…</option>
+                {BT_NIVEL.map((x) => <option key={x} value={x}>{x}</option>)}
+              </select>
+            </div>
+          ) : null}
+
+          <div style={{ gridColumn: "1 / -1" }}>
+            <div className="fieldLabel">Especialidad / Puesto / Formación laboral *</div>
+            {!bt.area_trabajo ? (
+              <div className="muted" style={{ fontSize: 12 }}>Primero seleccioná el Área de trabajo.</div>
+            ) : (
+              <>
+                <div className="searchRow" style={{ marginTop: 6 }}>
+                  <input className="input" placeholder="Buscar especialidad…" value={btSpecQuery} onChange={(e) => setBtSpecQuery(e.target.value)} />
+                  <button className="btnSecondary" onClick={() => setBtSpecQuery("")}>Limpiar</button>
+                </div>
+
+                <div className="chipsWrap" style={{ marginTop: 8 }}>
+                  {btFilteredSpecs.map((x) => (
+                    <button
+                      key={x}
+                      className={cls("chip", bt.especialidad === x && "chipActive")}
+                      onClick={() => btPickSpecialty(x)}
+                      type="button"
+                    >
+                      {x}
+                    </button>
+                  ))}
+                </div>
+
+                <div className="muted" style={{ fontSize: 12, marginTop: 8 }}>
+                  Seleccionado: <b>{bt.especialidad || "—"}</b>
+                </div>
+
+                {btErrors.especialidad ? <div className="errorText">{btErrors.especialidad}</div> : null}
+
+                {bt.especialidad === "Otros" ? (
+                  <div style={{ marginTop: 10 }}>
+                    <div className="fieldLabel">Otros – especificar *</div>
+                    <input
+                      className={cls("input", btErrors.especialidad_otro && "inputError")}
+                      value={bt.especialidad_otro}
+                      onChange={(e) => btSet("especialidad_otro", e.target.value)}
+                      placeholder="Escribí corto (3–60)"
+                      maxLength={60}
+                    />
+                    {btErrors.especialidad_otro ? <div className="errorText">{btErrors.especialidad_otro}</div> : null}
+                  </div>
+                ) : null}
+              </>
+            )}
+          </div>
+
+          <div style={{ gridColumn: "1 / -1" }}>
+            <button className="btnSecondary" onClick={btResetCascade} type="button">
+              Restablecer (nivel/especialidad)
+            </button>
+          </div>
+        </div>
+      </div>
+    </details>
+
+    <details className="acc">
+      <summary className="accSum">4) Experiencia y formación</summary>
+      <div className="accBody">
+        <div className="grid2">
+          <div>
+            <div className="fieldLabel">Años de experiencia *</div>
+            <select className={cls("input", btErrors.rango_experiencia && "inputError")} value={bt.rango_experiencia} onChange={(e) => btSet("rango_experiencia", e.target.value)}>
+              <option value="">Seleccionar…</option>
+              {BT_RANGO_EXP.map((x) => <option key={x} value={x}>{x}</option>)}
+            </select>
+          </div>
+          <div>
+            <div className="fieldLabel">Nivel educativo *</div>
+            <select className={cls("input", btErrors.nivel_educativo && "inputError")} value={bt.nivel_educativo} onChange={(e) => btSet("nivel_educativo", e.target.value)}>
+              <option value="">Seleccionar…</option>
+              {BT_NIVEL_EDU.map((x) => <option key={x} value={x}>{x}</option>)}
+            </select>
+          </div>
+          <div>
+            <div className="fieldLabel">¿Tiene capacitación de formación laboral? *</div>
+            <div className="segRow">
+              <button className={cls("segBtn", bt.tiene_capacitacion === "si" && "segActive")} onClick={() => btSet("tiene_capacitacion", "si")} type="button">Sí</button>
+              <button className={cls("segBtn", bt.tiene_capacitacion === "no" && "segActive")} onClick={() => btSet("tiene_capacitacion", "no")} type="button">No</button>
+            </div>
+            {btErrors.tiene_capacitacion ? <div className="errorText">{btErrors.tiene_capacitacion}</div> : null}
+          </div>
+        </div>
+      </div>
+    </details>
+
+    <details className="acc">
+      <summary className="accSum">5) Situación y preferencias</summary>
+      <div className="accBody">
+        <div className="grid2">
+          <div>
+            <div className="fieldLabel">¿Trabaja actualmente? *</div>
+            <div className="segRow">
+              <button className={cls("segBtn", bt.trabaja_actualmente === "si" && "segActive")} onClick={() => btSet("trabaja_actualmente", "si")} type="button">Sí</button>
+              <button className={cls("segBtn", bt.trabaja_actualmente === "no" && "segActive")} onClick={() => btSet("trabaja_actualmente", "no")} type="button">No</button>
+            </div>
+            {btErrors.trabaja_actualmente ? <div className="errorText">{btErrors.trabaja_actualmente}</div> : null}
+          </div>
+
+          <div>
+            <div className="fieldLabel">Sueldo pretendido</div>
+            <input className={cls("input", btErrors.sueldo_pretendido && "inputError")} value={bt.sueldo_pretendido} onChange={(e) => btSet("sueldo_pretendido", e.target.value.replace(/\D/g, ""))} inputMode="numeric" placeholder="(opcional)" />
+            {btErrors.sueldo_pretendido ? <div className="errorText">{btErrors.sueldo_pretendido}</div> : null}
+          </div>
+
+          <div style={{ gridColumn: "1 / -1" }}>
+            <div className="fieldLabel">¿Dónde trabajó por última vez?</div>
+            <input className={cls("input", btErrors.ultimo_trabajo && "inputError")} value={bt.ultimo_trabajo} onChange={(e) => btSet("ultimo_trabajo", e.target.value)} maxLength={80} placeholder="(opcional, 80 máx.)" />
+            {btErrors.ultimo_trabajo ? <div className="errorText">{btErrors.ultimo_trabajo}</div> : null}
+          </div>
+
+          <div style={{ gridColumn: "1 / -1" }}>
+            <div className="fieldLabel">Observaciones</div>
+            <textarea className={cls("input", btErrors.observaciones && "inputError")} value={bt.observaciones} onChange={(e) => btSet("observaciones", e.target.value)} maxLength={300} rows={3} placeholder="(opcional, 300 máx.)" />
+            {btErrors.observaciones ? <div className="errorText">{btErrors.observaciones}</div> : null}
+          </div>
+        </div>
+      </div>
+    </details>
+
+    <div style={{ marginTop: 12 }}>
+      <button className="btnPrimary" onClick={btSubmitDraft} type="button">
+        Guardar perfil
+      </button>
+      <div className="muted" style={{ fontSize: 12, marginTop: 8 }}>
+        En esta etapa el perfil queda guardado en el dispositivo. Próxima etapa: envío a la base y búsqueda por empresas.
+      </div>
     </div>
+
+    {btToast2 ? (
+      <div className="toast" style={{ marginTop: 10 }}>
+        <div className="toastText">{btToast2}</div>
+      </div>
+    ) : null}
   </section>
 )}
 
@@ -2147,15 +2830,15 @@ async function submitSocioForm() {
   <li><b>Publicaciones</b>: listado completo con búsqueda y filtros.</li>
   <li><b>Pro.Industrial</b>: publicaciones de la categoría “Promoción Industrial”.</li>
   <li><b>Manual</b>: esta ayuda.</li>
-  <li><b>Ajustes</b>: versión, clave admin, login socio, y utilidades (incluye “Bloquear zoom”).</li>
+  <li><b>Ajustes</b>: versión, clave admin, login socio, y utilidades (incluye “Bloquear zoom” (por defecto bloqueado)).</li>
 </ul>
 
 <h3>Inicio (accesos rápidos)</h3>
 <ul>
-  <li><b>Bolsa de trabajo</b>: acceso al módulo (en desarrollo).</li>
+  <li><b>Bolsa de trabajo</b>: alta de candidato (MVP) con desplegables y mínimos campos.</li>
   <li><b>Beneficios</b>: beneficios para socios y comunidad (desde Inicio).</li>
   <li><b>Agenda</b>: eventos y actividades (desde Inicio).</li>
-  <li><b>Requerimientos inst.</b>: acceso protegido por clave (sirve clave de socio o clave admin).</li>
+  <li><b>Requerimientos institucionales</b>: acceso protegido por clave (sirve clave de socio o clave admin).</li>
 </ul>
 
 <h3>Portal del Socio</h3>
@@ -2174,7 +2857,7 @@ async function submitSocioForm() {
 
 <h3>Accesos protegidos</h3>
 <div className="muted">
-  Si alguien que no es socio intenta abrir “Requerimientos inst.”, deberá ingresar una clave válida.
+  Si alguien que no es socio intenta abrir “Requerimientos institucionales”, deberá ingresar una clave válida.
   Esto evita que visitantes de “Bolsa de trabajo” exploren botones delicados.
 </div>
 
@@ -3225,10 +3908,10 @@ async function submitSocioForm() {
                     });
                   }}
                 >
-                  {zoomLocked ? "Desbloquear zoom" : "Bloquear zoom"}
+                  {zoomLocked ? "Desbloquear zoom" : "Bloquear zoom de pantalla"}
                 </button>
                 <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>
-                  Evita que la pantalla se agrande al escribir o al pellizcar.
+                  Evita que la pantalla se agrande al escribir o al pellizcar. (Por defecto está bloqueado).
                 </div>
 
                 {zoomToast ? (

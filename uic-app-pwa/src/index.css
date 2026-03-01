@@ -697,3 +697,67 @@ a{color:inherit}
 .manualBody h3{ margin: 12px 0 6px; font-size: 15px; }
 .manualBody ul{ margin: 6px 0 10px; padding-left: 18px; }
 .manualBody li{ margin: 4px 0; }
+
+
+/* Bolsa de trabajo (MVP) */
+.acc{
+  margin-top:12px;
+  border-radius:14px;
+  background:rgba(255,255,255,0.04);
+  border:1px solid rgba(255,255,255,0.08);
+  overflow:hidden;
+}
+.accSum{
+  padding:12px 12px;
+  cursor:pointer;
+  font-weight:800;
+  list-style:none;
+}
+.accSum::-webkit-details-marker{display:none}
+.accBody{
+  padding:0 12px 12px;
+}
+.grid2{
+  display:grid;
+  grid-template-columns:1fr 1fr;
+  gap:10px;
+}
+@media (max-width: 520px){
+  .grid2{grid-template-columns:1fr;}
+}
+.fieldLabel{
+  font-size:12px;
+  color:rgba(255,255,255,0.75);
+  margin:2px 0 6px;
+  font-weight:700;
+}
+.chipsWrap{
+  display:flex;
+  flex-wrap:wrap;
+  gap:8px;
+}
+.segRow{
+  display:flex;
+  gap:8px;
+  margin-top:6px;
+}
+.segBtn{
+  flex:1;
+  padding:10px 10px;
+  border-radius:12px;
+  border:1px solid rgba(255,255,255,0.14);
+  background:rgba(255,255,255,0.04);
+  color:var(--text);
+  font-weight:800;
+  cursor:pointer;
+}
+.segActive{
+  background:rgba(42,116,255,0.25);
+  border-color:rgba(42,116,255,0.55);
+}
+.errorText{
+  margin-top:6px;
+  color:rgba(255, 120, 120, 0.95);
+  font-size:12px;
+  font-weight:700;
+}
