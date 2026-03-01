@@ -3,345 +3,12 @@ import "./index.css";
 import logoUIC from "./assets/logo-uic.jpeg";
 
 // Versión visible (footer / ajustes)
-const APP_VERSION = "0.31.1";
+const APP_VERSION = "0.32.1";
 const BUILD_STAMP = (typeof __UIC_BUILD_STAMP__ !== "undefined") ? __UIC_BUILD_STAMP__ : "";
 const PWA_CACHE_ID = (typeof __UIC_CACHE_ID__ !== "undefined") ? __UIC_CACHE_ID__ : "";
 const PWA_COMMIT = (typeof __UIC_COMMIT__ !== "undefined") ? __UIC_COMMIT__ : "";
 
 const API_BASE = import.meta.env.VITE_API_BASE || ""; // ej: https://uic-campana-api.onrender.com
-
-// ---------------- Bolsa de Trabajo — catálogos (v0.31.x) ----------------
-// Nota: las claves (value) son estables; los textos (label) se pueden ajustar sin romper datos.
-const BT_AREAS = [
-  { value: "electrica", label: "Eléctrica (Industrial)" },
-  { value: "mecanica", label: "Mecánica (Industrial)" },
-  { value: "operaciones", label: "Operaciones de planta y producción" },
-  { value: "mantenimiento_general", label: "Mantenimiento industrial (general)" },
-  { value: "soldadura_montaje", label: "Soldadura, cañerías y montaje" },
-  { value: "caldereria", label: "Calderería y recipientes" },
-  { value: "climatizacion", label: "Climatización / Refrigeración industrial" },
-  { value: "mecanizado", label: "Mecanizado y fabricación (taller)" },
-  { value: "instrumentacion", label: "Instrumentación, control y automatización (I&C)" },
-  { value: "obra_civil", label: "Construcción y obra civil industrial" },
-  { value: "oficina_tecnica", label: "Proyectista / Oficina técnica / CAD-BIM" },
-  { value: "calculista", label: "Calculista / Ingeniería de detalle" },
-  { value: "supervision", label: "Supervisión / Capataz / Jefaturas operativas" },
-  { value: "planificacion", label: "Planificación y control (Planificador / Programación / Control de costos)" },
-  { value: "calidad_end", label: "Calidad e inspección (QA/QC – END)" },
-  { value: "hse", label: "Seguridad, higiene y ambiente (HSE)" },
-  { value: "logistica", label: "Logística, depósito y abastecimiento" },
-  { value: "administrativo", label: "Administrativo / RR.HH. / Finanzas / Comercial" },
-  { value: "sustentabilidad", label: "Sustentabilidad y Medio ambiente" },
-];
-
-const BT_NIVEL = [
-  "Ayudante / Auxiliar",
-  "Medio oficial",
-  "Oficial",
-  "Oficial especializado / Senior",
-  "Técnico",
-  "Supervisor",
-];
-
-const BT_RANGO_EXP = ["0–1", "2–5", "6–10", "11–20", "21–30", "31+"];
-
-const BT_NIVEL_EDU = ["Primaria", "Secundaria", "Terciaria", "Universitaria", "Otros"];
-
-const BT_ESTADO_CIVIL = ["Soltero/a", "Casado/a", "Unión convivencial", "Divorciado/a", "Viudo/a", "Prefiere no decir"];
-
-// Especialidades por área (catálogo inicial). Incluye “Otros” al final.
-// Nota: la búsqueda se hace por texto normalizado, y tolera sinónimos (ver BT_SYNONYMS).
-const BT_SPECIALTIES = {
-  electrica: [
-    "Electricista industrial",
-    "Electricista de montaje",
-    "Técnico electricista",
-    "Mantenimiento eléctrico",
-    "Tablerista / Armado de tableros",
-    "Cableador / Tendido de cables",
-    "Montador de bandejas y canalizaciones",
-    "Conexión de motores / arrancadores",
-    "Variadores de velocidad / soft starters",
-    "Bobinador / Rebobinador de motores",
-    "Instrumentación eléctrica (sensores/mediciones eléctricas)",
-    "Media tensión (celdas / subestaciones)",
-    "Protecciones eléctricas / relés",
-    "Puesta a tierra / pararrayos",
-    "Mediciones (megger, pinza, termografía)",
-    "Generadores / grupos electrógenos",
-    "UPS / energía crítica",
-    "Iluminación industrial",
-    "Comisionamiento eléctrico",
-    "Otros",
-  ],
-  mecanica: [
-    "Mecánico industrial",
-    "Mecánico de montaje",
-    "Técnico mecánico",
-    "Mantenimiento mecánico",
-    "Ajustador mecánico",
-    "Montador mecánico",
-    "Mecánico de bombas",
-    "Mecánico de compresores",
-    "Mecánico de turbinas / equipos rotantes",
-    "Mecánico de válvulas (mantenimiento)",
-    "Reductores / transmisiones",
-    "Alineación láser",
-    "Balanceo / vibraciones (básico)",
-    "Lubricación / tribología",
-    "Hidráulica industrial",
-    "Neumática industrial",
-    "Rodamientos / sellos mecánicos",
-    "Mantenimiento de calderas (mecánico)",
-    "Mecánico automotor (flota/industria)",
-    "Otros",
-  ],
-  operaciones: [
-    "Operador de planta",
-    "Operador de producción",
-    "Operador de sala de control (DCS/SCADA)",
-    "Operador de campo",
-    "Operador de refinería / petroquímica",
-    "Operador de gas / compresión",
-    "Operador de separación / tratamiento",
-    "Operador de utilities (aire, agua, vapor)",
-    "Operador de calderas",
-    "Operador de tratamiento de agua",
-    "Operador de efluentes",
-    "Operador de cargas y descargas (terminal)",
-    "Operador de bombas / estaciones",
-    "Roustabout / Peón de campo (Oil & Gas)",
-    "Floorhand / Roughneck (Oil & Gas)",
-    "Operador de fractura (Oil & Gas)",
-    "Operador de coiled tubing (Oil & Gas)",
-    "Operador de wireline (Oil & Gas)",
-    "Otros",
-  ],
-  mantenimiento_general: [
-    "Técnico de mantenimiento",
-    "Mantenimiento preventivo",
-    "Mantenimiento correctivo",
-    "Mantenimiento predictivo",
-    "Mantenimiento edilicio industrial",
-    "Mantenedor general",
-    "Lubricador",
-    "Auxiliar de mantenimiento",
-    "Mantenimiento de bombas y válvulas",
-    "Mantenimiento de transportadores",
-    "Mantenimiento de equipos estáticos",
-    "Paradas de planta (mantenimiento)",
-    "Otros",
-  ],
-  soldadura_montaje: [
-    "Soldador SMAW (electrodo)",
-    "Soldador GTAW/TIG",
-    "Soldador GMAW/MIG-MAG",
-    "Soldador FCAW (alambre tubular)",
-    "Soldador 6G (cañería)",
-    "Soldador calificado (ASME/API)",
-    "Ayudante de soldador",
-    "Punteador",
-    "Esmerilador / amolador",
-    "Biselador",
-    "Cañista (piping)",
-    "Tubero / Instalador de cañerías",
-    "Montajista / armador",
-    "Prefabricación / spooling",
-    "Bridador / juntista",
-    "Aislación y calorifugado (piping)",
-    "Montaje de estructuras",
-    "Otros",
-  ],
-  caldereria: [
-    "Calderero",
-    "Armador de recipientes",
-    "Armador de tanques",
-    "Trazador / marcador",
-    "Plegador",
-    "Guillotinero",
-    "Rolador (cilindradora)",
-    "Oxicortista / plasma",
-    "Soldador para calderería",
-    "Fabricación de ductos",
-    "Montaje de recipientes a presión",
-    "Otros",
-  ],
-  climatizacion: [
-    "Técnico frigorista",
-    "Técnico en refrigeración industrial",
-    "HVAC industrial (aire/ventilación)",
-    "Instalador de equipos (industrial)",
-    "Mantenimiento de chillers",
-    "Mantenimiento de cámaras frigoríficas",
-    "Torres de enfriamiento (mantenimiento)",
-    "Aire comprimido (secadores/aire)",
-    "Otros",
-  ],
-  mecanizado: [
-    "Tornero",
-    "Fresador",
-    "Rectificador",
-    "Alesador",
-    "Operador CNC (torno)",
-    "Operador CNC (fresa/centro)",
-    "Programador CNC",
-    "Metrología / control dimensional (taller)",
-    "Afilador de herramientas",
-    "Matricero",
-    "Herramentista",
-    "Ajustador / armado de piezas",
-    "Soldadura y reparación de piezas (taller)",
-    "Otros",
-  ],
-  instrumentacion: [
-    "Instrumentista",
-    "Técnico I&C",
-    "Calibración de instrumentos",
-    "Montaje de instrumentos (campo)",
-    "Montaje de tubing / conexiones",
-    "Válvulas de control / posicionadores",
-    "Analizadores de proceso",
-    "Lazos de control (pruebas)",
-    "PLC (soporte/puesta en marcha)",
-    "DCS / sala de control (soporte)",
-    "SCADA (soporte)",
-    "Comisionamiento I&C",
-    "Otros",
-  ],
-  obra_civil: [
-    "Albañil industrial",
-    "Oficial de construcción",
-    "Encofrador",
-    "Armador de hierro (fierrero)",
-    "Hormigonero / terminaciones",
-    "Colocador de pisos industriales",
-    "Pintor (obra)",
-    "Aislamiento / impermeabilización",
-    "Topografía (auxiliar)",
-    "Maestro mayor de obras",
-    "Otros",
-  ],
-  oficina_tecnica: [
-    "Dibujante técnico",
-    "Proyectista mecánico",
-    "Proyectista eléctrico",
-    "Proyectista piping",
-    "Proyectista civil",
-    "BIM Modeler",
-    "Modelador 3D (CAD)",
-    "Document control",
-    "Metrados / cómputos",
-    "Planillero",
-    "Otros",
-  ],
-  calculista: [
-    "Calculista de estructuras metálicas",
-    "Calculista civil (hormigón)",
-    "Cálculo de piping (stress analysis)",
-    "Cálculo de recipientes / ASME",
-    "Cálculo de intercambiadores",
-    "Cálculo eléctrico (cortocircuito/selectividad)",
-    "Cálculo de iluminación",
-    "Memorias de cálculo",
-    "Otros",
-  ],
-  supervision: [
-    "Supervisor de obra",
-    "Capataz",
-    "Jefe de turno",
-    "Supervisor de mantenimiento",
-    "Supervisor de montaje",
-    "Supervisor de piping",
-    "Supervisor eléctrico",
-    "Supervisor mecánico",
-    "Supervisor I&C",
-    "Supervisor QA/QC",
-    "Otros",
-  ],
-  planificacion: [
-    "Planificador de mantenimiento",
-    "Programador (Scheduler)",
-    "Planner de obra",
-    "Control de costos",
-    "Planificación de paradas de planta",
-    "Gestión de materiales (planning)",
-    "Reporting / KPIs (proyectos)",
-    "Otros",
-  ],
-  calidad_end: [
-    "Inspector QC",
-    "Aseguramiento de calidad (QA)",
-    "Inspector de soldadura",
-    "Inspector de piping",
-    "Inspector de pintura / recubrimientos",
-    "Inspector dimensional",
-    "Inspector END – VT (visual)",
-    "END – PT (líquidos penetrantes)",
-    "END – MT (partículas magnéticas)",
-    "END – UT (ultrasonido)",
-    "END – RT (radiografía)",
-    "END – PMI / dureza",
-    "Laboratorio (ensayos)",
-    "Documentación de calidad",
-    "Otros",
-  ],
-  hse: [
-    "Técnico en seguridad e higiene",
-    "Supervisor HSE",
-    "Permisos de trabajo / LOTO",
-    "Investigación de incidentes",
-    "Auditor ISO 45001",
-    "Gestión de riesgos",
-    "Brigadista / respuesta a emergencias",
-    "Medio ambiente (HSE)",
-    "Otros",
-  ],
-  logistica: [
-    "Operador de autoelevador",
-    "Pañolero",
-    "Depósito / almacén",
-    "Picker / preparación de pedidos",
-    "Recepción y despacho",
-    "Abastecimiento / compras",
-    "Chofer (camión/utilitario)",
-    "Logística interna",
-    "Control de inventario",
-    "Otros",
-  ],
-  administrativo: [
-    "Administrativo/a",
-    "Asistente de RR.HH.",
-    "Liquidación de sueldos",
-    "Contable",
-    "Tesorería",
-    "Facturación",
-    "Compras / procurement",
-    "Comercial / ventas",
-    "Atención al cliente",
-    "Administración de contratos",
-    "Otros",
-  ],
-  sustentabilidad: [
-    "Gestión ambiental",
-    "Analista de sustentabilidad / ESG",
-    "Gestión de residuos",
-    "Gestión de energía / eficiencia",
-    "Huella de carbono (GHG)",
-    "ISO 14001 / auditorías",
-    "Monitoreo ambiental",
-    "Relación con comunidad",
-    "Otros",
-  ],
-};
-
-const BT_SYNONYMS = {
-  // Soldadura / piping
-  "instalador de cañerias": "Cañista (piping)",
-  "canista": "Cañista (piping)",
-  "tubero": "Tubero / Instalador de cañerías",
-  "end": "END – Ultrasonido (UT)", // ejemplo
-  "qaqc": "Inspector QC",
-};
 
 function cls(...xs) {
   return xs.filter(Boolean).join(" ");
@@ -474,153 +141,12 @@ export default function App() {
   };
   const [tab, setTab] = useState("inicio"); // inicio | publicaciones | proindustrial | manual | beneficios | agenda | bolsa | comunicacion | mensajes | socios | ajustes
 
-  // ---------------- Bolsa de Trabajo (MVP v0.31.x) ----------------
-  const BT_DRAFT_KEY = "uic_bt_candidate_draft_v1";
-  const btEmpty = useMemo(() => ({
-    nombre: "",
-    apellido: "",
-    dni: "",
-    nacionalidad: "",
-    estado_civil: "",
-    telefono: "",
-    correo: "",
-    localidad: "",
-    direccion: "",
-    area_trabajo: "",
-    nivel: "",
-    especialidad: "",
-    especialidad_otro: "",
-    rango_experiencia: "",
-    nivel_educativo: "",
-    tiene_capacitacion: "", // "si" | "no"
-    trabaja_actualmente: "", // "si" | "no"
-    sueldo_pretendido: "",
-    ultimo_trabajo: "",
-    observaciones: "",
-  }), []);
-
-  const [bt, setBt] = useState(() => {
-    try {
-      const raw = localStorage.getItem(BT_DRAFT_KEY);
-      if (!raw) return btEmpty;
-      const obj = JSON.parse(raw);
-      return { ...btEmpty, ...(obj || {}) };
-    } catch (_) {
-      return btEmpty;
-    }
-  });
-
-  const [btErrors, setBtErrors] = useState({});
-  const [btToast2, setBtToast2] = useState("");
-  const [btSpecQuery, setBtSpecQuery] = useState("");
-
-  const btNeedsNivel = bt.area_trabajo === "electrica" || bt.area_trabajo === "mecanica";
-  const btSpecOptions = useMemo(() => {
-    const opts = BT_SPECIALTIES?.[bt.area_trabajo] || [];
-    return Array.isArray(opts) ? opts : [];
-  }, [bt.area_trabajo]);
-
-  useEffect(() => {
-    try {
-      localStorage.setItem(BT_DRAFT_KEY, JSON.stringify(bt));
-    } catch (_) {}
-  }, [bt]);
-
-  const btSet = (k, v) => setBt((prev) => ({ ...prev, [k]: v }));
-
-  const btResetCascade = () => {
-    setBt((prev) => ({ ...prev, nivel: "", especialidad: "", especialidad_otro: "" }));
-    setBtSpecQuery("");
-  };
-
-  const btSelectArea = (v) => {
-    setBt((prev) => ({ ...prev, area_trabajo: v, nivel: "", especialidad: "", especialidad_otro: "" }));
-    setBtSpecQuery("");
-  };
-
-  const btPickSpecialty = (label) => {
-    btSet("especialidad", label);
-    if (label !== "Otros") btSet("especialidad_otro", "");
-  };
-
-  const btNormalized = (s) => normStr(String(s || ""));
-
-  const btValidate = () => {
-    const e = {};
-    const dni = String(bt.dni || "").trim();
-    const tel = String(bt.telefono || "").trim();
-    const mail = String(bt.correo || "").trim();
-    const obs = String(bt.observaciones || "");
-    const ult = String(bt.ultimo_trabajo || "");
-
-    const must = (k, msg) => {
-      if (!String(bt[k] || "").trim()) e[k] = msg;
-    };
-
-    must("nombre", "Requerido");
-    must("apellido", "Requerido");
-    must("dni", "Requerido");
-    must("telefono", "Requerido");
-    must("correo", "Requerido");
-    must("localidad", "Requerido");
-    must("area_trabajo", "Requerido");
-    must("especialidad", "Requerido");
-    must("rango_experiencia", "Requerido");
-    must("nivel_educativo", "Requerido");
-    must("tiene_capacitacion", "Requerido");
-    must("trabaja_actualmente", "Requerido");
-
-    if (btNeedsNivel) must("nivel", "Requerido");
-
-    if (dni && !/^\d{7,9}$/.test(dni)) e.dni = "DNI inválido (7–9 dígitos)";
-    if (mail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(mail)) e.correo = "Correo inválido";
-    if (bt.sueldo_pretendido && !/^\d+$/.test(String(bt.sueldo_pretendido).trim())) e.sueldo_pretendido = "Solo números";
-    if (obs && obs.length > 300) e.observaciones = "Máx 300 caracteres";
-    if (ult && ult.length > 80) e.ultimo_trabajo = "Máx 80 caracteres";
-
-    if (bt.especialidad === "Otros") {
-      const o = String(bt.especialidad_otro || "").trim();
-      if (o.length < 3 || o.length > 60) e.especialidad_otro = "Especificá 3–60 caracteres";
-    }
-
-    return e;
-  };
-
-  const btSubmitDraft = () => {
-    const e = btValidate();
-    setBtErrors(e);
-    if (Object.keys(e).length) {
-      setBtToast2("Revisá los campos marcados en rojo.");
-      setTimeout(() => setBtToast2(""), 1800);
-      return;
-    }
-    setBtToast2("Perfil guardado.");
-    setTimeout(() => setBtToast2(""), 1800);
-  };
-
-  const btFilteredSpecs = useMemo(() => {
-    const q = btNormalized(btSpecQuery);
-    const opts = btSpecOptions || [];
-    if (!q) return opts.slice(0, 24);
-    const syn = BT_SYNONYMS?.[q];
-    if (syn) {
-      // Si el buscador matchea un sinónimo exacto, lo subimos arriba
-      const unique = [syn, ...opts.filter((x) => x !== syn)];
-      return unique.slice(0, 24);
-    }
-    return opts
-      .filter((x) => btNormalized(x).includes(q))
-      .slice(0, 24);
-  }, [btSpecOptions, btSpecQuery]);
-
   // Zoom lock (evita zoom por pellizco y el auto-zoom al escribir en iOS).
   // Se guarda por dispositivo.
   const ZOOM_LOCK_KEY = "uic_zoom_locked_v1";
   const [zoomLocked, setZoomLocked] = useState(() => {
     try {
-      const v = localStorage.getItem(ZOOM_LOCK_KEY);
-      if (v == null) return true; // por defecto bloqueado
-      return v === "1";
+      return localStorage.getItem(ZOOM_LOCK_KEY) === "1";
     } catch (_) {
       return false;
     }
@@ -844,6 +370,377 @@ const verifyReqGateAndOpen = async () => {
     setReqGateBusy(false);
   }
 };
+
+
+// ---------------- Bolsa de Trabajo ----------------
+const [bolsaMode, setBolsaMode] = useState("alta"); // alta | buscar
+const [candBusy, setCandBusy] = useState(false);
+const [candOk, setCandOk] = useState("");
+const [candErr, setCandErr] = useState("");
+const [cand, setCand] = useState({
+  nombre: "",
+  apellido: "",
+  dni: "",
+  nacionalidad: "Argentina",
+  estado_civil: "",
+  hijos: "",
+  telefono: "",
+  correo: "",
+  localidad: "",
+  direccion: "",
+  area_trabajo: "",
+  nivel: "",
+  especialidad: "",
+  especialidad_otro: "",
+  rango_experiencia: "",
+  nivel_educativo: "",
+  tiene_capacitacion: "no",
+  trabaja_actualmente: "no",
+  sueldo_pretendido: "",
+  ultimo_trabajo: "",
+  observaciones: "",
+  herramientas_mecanica: [],
+  instrumentos_electrica: [],
+});
+
+const [jobsStats, setJobsStats] = useState(null);
+const [jobsQ, setJobsQ] = useState("");
+const [jobsArea, setJobsArea] = useState("");
+const [jobsLoc, setJobsLoc] = useState("");
+const [jobsItems, setJobsItems] = useState([]);
+const [jobsErr, setJobsErr] = useState("");
+const [jobsBusy, setJobsBusy] = useState(false);
+const [jobsSelected, setJobsSelected] = useState(null);
+
+const AREA_TRABAJO = [
+  "Eléctrica (Industrial)",
+  "Mecánica (Industrial)",
+  "Operaciones de planta y producción",
+  "Mantenimiento industrial (general)",
+  "Soldadura, cañerías y montaje",
+  "Calderería y recipientes",
+  "Climatización / Refrigeración industrial",
+  "Mecanizado y fabricación (taller)",
+  "Instrumentación, control y automatización (I&C)",
+  "Construcción y obra civil industrial",
+  "Proyectista / Oficina técnica / CAD-BIM",
+  "Calculista / Ingeniería de detalle",
+  "Supervisión / Capataz / Jefaturas operativas",
+  "Planificación y control (Planificador / Programación / Control de costos)",
+  "Calidad e inspección (QA/QC – Ensayos no destructivos)",
+  "Seguridad, higiene y ambiente (HSE)",
+  "Logística, depósito y abastecimiento",
+  "Administrativo / RR.HH. / Finanzas / Comercial",
+  "Sustentabilidad y Medio ambiente",
+  // NUEVAS (v31.3)
+  "Transporte y logística",
+  "Comercio exterior",
+  "IT / Software",
+];
+
+const NIVEL_ELECTRO_MEC = ["Ayudante / Auxiliar", "Medio oficial", "Oficial", "Oficial especializado / Senior", "Técnico", "Supervisor"];
+const RANGO_EXP = ["0–1", "2–5", "6–10", "11–20", "21–30", "31+"];
+const NIVEL_EDU = ["Primaria", "Secundaria", "Terciaria", "Universitaria", "Otros"];
+const ESTADO_CIVIL = ["Soltero/a", "Casado/a", "Unión convivencial / Concubinato", "Separado/a", "Divorciado/a", "Viudo/a"];
+
+const HIJOS_OPC = ["Sin hijos", "1", "2", "Más de 2"];
+
+// Máquinas-herramienta (Mecánica) – multiselección
+const MAQ_HERR_MECANICA = [
+  "Torno paralelo (a tornillo)",
+  "Torno CNC",
+  "Fresadora universal",
+  "Fresadora CNC / Centro de mecanizado",
+  "Alesadora",
+  "Mandrinadora",
+  "Rectificadora (plana/cilíndrica)",
+  "Sierra cinta",
+  "Sierra circular / tronzadora industrial",
+  "Taladro de banco / radial",
+  "Mortajadora / chavetero",
+  "Prensa hidráulica",
+  "Plegadora",
+  "Guillotina",
+  "Roladora / cilindradora",
+  "Corte plasma",
+  "Corte oxicorte",
+  "Soldadora MIG/MAG (equipo)",
+  "Soldadora TIG (equipo)",
+  "Soldadora MMA / electrodo (equipo)",
+  "Equipo de alineación láser",
+  "Equipo de balanceo",
+  "Equipo de medición de vibraciones",
+  "Instrumental de metrología (comparador, alesómetro, etc.)",
+  "Puente grúa / izaje (operación)",
+  "Otros",
+];
+
+// Instrumentos/equipos (Eléctrica) – multiselección
+const INSTR_ELECTRICA = [
+  "Pinza amperométrica TRMS",
+  "Megóhmetro (Megger) – aislación",
+  "Telurómetro / medidor de puesta a tierra",
+  "Analizador de calidad de energía / armónicas",
+  "Osciloscopio",
+  "Termografía (cámara térmica)",
+  "Detector de tensión / fase",
+  "Secuencímetro (secuencia de fases)",
+  "Medidor de continuidad de puesta a tierra",
+  "Multímetro industrial TRMS (avanzado)",
+  "Calibrador de lazos 4–20 mA (I&C)",
+  "Generador de señal / calibrador",
+  "Medidor de aislamiento en MT",
+  "Equipo de prueba de relés/protecciones",
+  "Registrador de datos (datalogger) eléctrico",
+  "Medidor de fugas / diferencial",
+  "Luxómetro industrial",
+  "Tacómetro / estroboscopio",
+  "Otros",
+];
+const NACIONALIDAD = ["Argentina", "Uruguaya", "Paraguaya", "Boliviana", "Chilena", "Brasileña", "Peruana", "Colombiana", "Venezolana", "Otra"];
+
+// Localidades sugeridas (editable: el usuario puede escribir igual)
+const LOCALIDADES = [
+  "Campana", "Zárate", "Pilar", "Escobar", "Tigre", "Malvinas Argentinas", "San Fernando", "San Isidro", "Vicente López", "San Martín", "Hurlingham", "Morón",
+  "CABA", "La Plata", "Mar del Plata", "Bahía Blanca", "Rosario", "Córdoba", "Mendoza", "San Juan", "Neuquén", "Comodoro Rivadavia", "Río Gallegos", "Salta", "Tucumán",
+  "Otra",
+];
+
+// Especialidades por área (catálogo inicial). Para búsqueda, incluimos “Otros”.
+const ESPECIALIDADES = {
+  "Eléctrica (Industrial)": [
+    "Electricista industrial", "Oficial electricista", "Técnico electricista", "Tablerista", "Montador de bandejas / canalizaciones", "Instrumentista eléctrico", "Bobinador de motores", "Mantenimiento eléctrico", "Guardia eléctrica", "Protecciones / relés", "Media tensión", "Alta tensión", "Iluminación industrial", "Termografía eléctrica", "Líneas y subestaciones", "Otros",
+  ],
+  "Mecánica (Industrial)": [
+    "Mecánico industrial", "Técnico mecánico", "Mecánico de mantenimiento", "Alineación y balanceo", "Bombas y válvulas", "Compresores", "Turbomáquinas", "Motores", "Hidráulica", "Neumática", "Reductores", "Rodamientos", "Lubricación", "Mecánico de planta", "Otros",
+  ],
+  "Operaciones de planta y producción": [
+    "Operador de planta", "Operador de sala de control", "Operador de campo", "Operador de producción", "Operador de proceso", "Operador de tratamiento de agua", "Operador de caldera", "Operador de utilidades", "Operador Oil & Gas", "Operador de carga/descarga", "Otros",
+  ],
+  "Mantenimiento industrial (general)": [
+    "Técnico de mantenimiento", "Mantenimiento general", "Mecánica y eléctrica", "Mantenimiento preventivo", "Mantenimiento correctivo", "Lubricador industrial", "Inspector de mantenimiento", "Supervisor de mantenimiento", "Otros",
+  ],
+  "Soldadura, cañerías y montaje": [
+    "Soldador SMAW (electrodo)", "Soldador MIG/MAG", "Soldador TIG", "Soldador 6G", "Cañista / cañero", "Montador de cañerías", "Armador", "Montajista", "Gomería industrial (mangueras)", "Aislación térmica", "Otros",
+  ],
+  "Calderería y recipientes": [
+    "Calderero", "Armador de calderería", "Trazador", "Soldador calderería", "Recipientes a presión", "Tanques", "Intercambiadores", "Otros",
+  ],
+  "Climatización / Refrigeración industrial": [
+    "Técnico en refrigeración", "Frigorista", "Climatización VRV/VRF", "Chillers", "Cámaras frigoríficas", "HVAC industrial", "Otros",
+  ],
+  "Mecanizado y fabricación (taller)": [
+    "Tornero", "Fresador", "Alesador", "CNC operador", "CNC programador", "Rectificador", "Afilador", "Ajustador", "Plegador", "Guillotinero", "Otros",
+  ],
+  "Instrumentación, control y automatización (I&C)": [
+    "Instrumentista", "Técnico en instrumentación", "PLC / SCADA", "Automatista", "Calibración", "Válvulas de control", "Lazo de control", "DCS", "Redes industriales", "Otros",
+  ],
+  "Construcción y obra civil industrial": [
+    "Albañil", "Oficial de obra", "Hormigonero", "Encofrador", "Fierrero", "Pintor industrial", "Andamiero", "Gruista", "Operador de excavadora", "Operador de retro", "Maquinista", "Otros",
+  ],
+  "Proyectista / Oficina técnica / CAD-BIM": [
+    "Dibujante técnico", "Proyectista mecánico", "Proyectista eléctrico", "Proyectista piping", "CADista", "BIM modeler", "Documentación técnica", "Isométricos", "Otros",
+  ],
+  "Calculista / Ingeniería de detalle": [
+    "Calculista estructuras", "Calculista piping", "Calculista recipientes", "Ingeniería de detalle", "Cálculo mecánico", "Cálculo eléctrico", "Memorias de cálculo", "Otros",
+  ],
+  "Supervisión / Capataz / Jefaturas operativas": [
+    "Supervisor de obra", "Capataz", "Jefe de turno", "Jefe de mantenimiento", "Supervisor de montaje", "Supervisor de producción", "Inspector de campo", "Otros",
+  ],
+  "Planificación y control (Planificador / Programación / Control de costos)": [
+    "Planificador", "Programador", "Control de costos", "Planner mantenimiento", "Planner obra", "MS Project", "Primavera P6", "Compras técnicas", "Otros",
+  ],
+  "Calidad e inspección (QA/QC – Ensayos no destructivos)": [
+    "Inspector QA/QC", "Inspector soldadura", "Inspector piping", "Inspector estructuras", "END - VT", "END - PT", "END - MT", "END - UT", "END - RT", "Inspector dimensional", "Otros",
+  ],
+  "Seguridad, higiene y ambiente (HSE)": [
+    "Técnico en seguridad e higiene", "Supervisor HSE", "Permisos de trabajo", "Auditor HSE", "Brigadista", "Gestión ambiental", "Otros",
+  ],
+  "Logística, depósito y abastecimiento": [
+    "Operario de depósito", "Clarkista / autoelevador", "Picker", "Pańolero", "Abastecedor de línea", "Receptor", "Expedición", "Inventarios", "Compras", "Otros",
+  ],
+  "Administrativo / RR.HH. / Finanzas / Comercial": [
+    "Administrativo", "Asistente", "RR.HH.", "Liquidación de sueldos", "Contabilidad", "Tesorería", "Facturación", "Comercial", "Atención al cliente", "Otros",
+  ],
+  "Sustentabilidad y Medio ambiente": [
+    "Gestión ambiental", "Residuos", "Sustentabilidad", "Huella de carbono", "ISO 14001", "Reportes ESG", "Otros",
+  ],
+  "Transporte y logística": [
+    "Chofer camión", "Chofer semi / batea", "Chofer hidrogrúa", "Chofer autoelevador (movimientos)", "Despachante / tráfico", "Coordinador de transporte", "Ruteador", "Operador de balanza", "Supervisor logística", "Otros",
+  ],
+  "Comercio exterior": [
+    "Analista Comex", "Despachante de aduana", "Documentación de exportación", "Documentación de importación", "Clasificación arancelaria", "Logística internacional", "Forwarder", "Compras internacionales", "Otros",
+  ],
+  "IT / Software": [
+    "Soporte técnico", "Helpdesk", "Administrador de sistemas", "Redes", "Ciberseguridad", "Desarrollador frontend", "Desarrollador backend", "Full stack", "QA / Testing", "DevOps", "Data / BI", "Otros",
+  ],
+};
+
+const jobsAuthHeaders = () => {
+  const h = {};
+
+
+const facetCount = (facet, key) => {
+  const v = jobsStats?.facets?.[facet]?.[key];
+  return Number.isFinite(Number(v)) ? Number(v) : 0;
+};
+
+const sortedFacetEntries = (facet) => {
+  const obj = jobsStats?.facets?.[facet] || {};
+  return Object.entries(obj).sort((a,b) => (b[1]||0) - (a[1]||0));
+};
+
+  if (adminToken) h["x-admin-token"] = adminToken;
+  if (memberToken) h["x-member-token"] = memberToken;
+  return h;
+};
+
+const loadJobsStats = async () => {
+  if (!API_BASE) { setJobsErr("No hay conexión con la API."); return; }
+  if (!adminToken && !memberToken) { setJobsErr("Ingresá como socio o administrador para buscar CV."); return; }
+  setJobsBusy(true);
+  setJobsErr("");
+  try {
+    const r = await fetch(`${API_BASE}/jobs/stats`, { headers: jobsAuthHeaders() });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(j?.error || "Error al obtener datos");
+    setJobsStats(j);
+  } catch (e) {
+    setJobsErr(String(e?.message || e));
+  } finally {
+    setJobsBusy(false);
+  }
+};
+
+const searchJobs = async () => {
+  if (!API_BASE) { setJobsErr("No hay conexión con la API."); return; }
+  if (!adminToken && !memberToken) { setJobsErr("Ingresá como socio o administrador para buscar CV."); return; }
+  setJobsBusy(true);
+  setJobsErr("");
+  try {
+    const url = new URL(`${API_BASE}/jobs/search`);
+    if ((jobsQ || "").trim()) url.searchParams.set("q", (jobsQ || "").trim());
+    if (jobsArea) url.searchParams.set("area", jobsArea);
+    if (jobsLoc) url.searchParams.set("localidad", jobsLoc);
+    const r = await fetch(url.toString(), { headers: jobsAuthHeaders() });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(j?.error || "Error al buscar");
+    setJobsItems(j.items || []);
+    setJobsSelected(null);
+  } catch (e) {
+    setJobsErr(String(e?.message || e));
+  } finally {
+    setJobsBusy(false);
+  }
+};
+
+const exportJobsTsv = async () => {
+  if (!API_BASE) return;
+  if (!adminToken) { setJobsErr("Solo el administrador puede descargar la base completa."); return; }
+  try {
+    const r = await fetch(`${API_BASE}/jobs/export`, { headers: { "x-admin-token": adminToken } });
+    if (!r.ok) {
+      const j = await r.json().catch(() => ({}));
+      throw new Error(j?.error || "No se pudo exportar");
+    }
+    const blob = await r.blob();
+    const a = document.createElement("a");
+    const url = URL.createObjectURL(blob);
+    a.href = url;
+    a.download = `uic_bolsa_trabajo_${new Date().toISOString().slice(0,10)}.tsv`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  } catch (e) {
+    setJobsErr(String(e?.message || e));
+  }
+};
+
+const submitCandidate = async () => {
+  if (!API_BASE) { setCandErr("No hay conexión con la API."); return; }
+  setCandBusy(true);
+  setCandErr("");
+  setCandOk("");
+  // Validación rápida (mínima escritura, pero campos críticos obligatorios)
+  const dniDigits = String(cand.dni || "").replace(/\D+/g, "");
+  const emailOk = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(cand.correo || "").trim());
+  if (!String(cand.nombre||"").trim()) { setCandErr("Nombre requerido"); setCandBusy(false); return; }
+  if (!String(cand.apellido||"").trim()) { setCandErr("Apellido requerido"); setCandBusy(false); return; }
+  if (!(dniDigits.length >= 7 && dniDigits.length <= 9)) { setCandErr("DNI inválido"); setCandBusy(false); return; }
+  if (!String(cand.nacionalidad||"").trim()) { setCandErr("Nacionalidad requerida"); setCandBusy(false); return; }
+  if (!String(cand.estado_civil||"").trim()) { setCandErr("Estado civil requerido"); setCandBusy(false); return; }
+  if (!String(cand.hijos||"").trim()) { setCandErr("Hijos requerido"); setCandBusy(false); return; }
+  if (!String(cand.telefono||"").trim()) { setCandErr("Teléfono requerido"); setCandBusy(false); return; }
+  if (!emailOk) { setCandErr("Correo inválido"); setCandBusy(false); return; }
+  if (!String(cand.localidad||"").trim()) { setCandErr("Localidad requerida"); setCandBusy(false); return; }
+  if (!String(cand.area_trabajo||"").trim()) { setCandErr("Área de trabajo requerida"); setCandBusy(false); return; }
+  // Nivel sólo para Eléctrica/Mecánica
+  const needsNivel = ["Eléctrica (Industrial)", "Mecánica (Industrial)"].includes(String(cand.area_trabajo||""));
+  if (needsNivel && !String(cand.nivel||"").trim()) { setCandErr("Nivel requerido"); setCandBusy(false); return; }
+  if (!String(cand.especialidad||"").trim()) { setCandErr("Especialidad requerida"); setCandBusy(false); return; }
+  if (String(cand.especialidad) === "Otros" && !(String(cand.especialidad_otro||"").trim().length >= 3)) { setCandErr("Completá 'Otros' (mínimo 3 caracteres)"); setCandBusy(false); return; }
+  if (!String(cand.rango_experiencia||"").trim()) { setCandErr("Años de experiencia requerido"); setCandBusy(false); return; }
+  if (!String(cand.nivel_educativo||"").trim()) { setCandErr("Nivel educativo requerido"); setCandBusy(false); return; }
+  try {
+    const payload = {
+      ...cand,
+      dni: String(cand.dni || "").replace(/\D+/g, ""),
+      tiene_capacitacion: String(cand.tiene_capacitacion || "no") === "si",
+      trabaja_actualmente: String(cand.trabaja_actualmente || "no") === "si",
+    };
+    const r = await fetch(`${API_BASE}/jobs/candidates`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(j?.error || "Error al guardar");
+    setCandOk("Registro enviado. ¡Gracias!");
+    setCand({
+      nombre: "",
+      apellido: "",
+      dni: "",
+      nacionalidad: "Argentina",
+      estado_civil: "",
+      hijos: "",
+      telefono: "",
+      correo: "",
+      localidad: "",
+      direccion: "",
+      area_trabajo: "",
+      nivel: "",
+      especialidad: "",
+      especialidad_otro: "",
+      rango_experiencia: "",
+      nivel_educativo: "",
+      tiene_capacitacion: "no",
+      trabaja_actualmente: "no",
+      sueldo_pretendido: "",
+      ultimo_trabajo: "",
+      observaciones: "",
+      herramientas_mecanica: [],
+      instrumentos_electrica: [],
+    });
+  } catch (e) {
+    setCandErr(String(e?.message || e));
+  } finally {
+    setCandBusy(false);
+  }
+};
+
+// Reset dependencias al cambiar área
+useEffect(() => {
+  setCand((prev) => ({
+    ...prev,
+    nivel: "",
+    especialidad: "",
+    especialidad_otro: "",
+  }));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+}, [cand.area_trabajo]);
+
+
 
   // Planilla de socios (admin)
   const [planillaOpen, setPlanillaOpen] = useState(false);
@@ -2594,225 +2491,455 @@ async function submitSocioForm() {
         )}
 
         {tab === "bolsa" && (
-  <section className="card">
-    <div className="cardTitle">Bolsa de Trabajo</div>
-    <div className="muted" style={{ marginTop: 6 }}>
-      Alta de candidato (MVP). La idea es que escribas lo menos posible: desplegables + sí/no.
-    </div>
-
-    <details className="acc" open>
-      <summary className="accSum">1) Datos personales</summary>
-      <div className="accBody">
-        <div className="grid2">
-          <div>
-            <div className="fieldLabel">Nombre *</div>
-            <input className={cls("input", btErrors.nombre && "inputError")} value={bt.nombre} onChange={(e) => btSet("nombre", e.target.value)} />
-          </div>
-          <div>
-            <div className="fieldLabel">Apellido *</div>
-            <input className={cls("input", btErrors.apellido && "inputError")} value={bt.apellido} onChange={(e) => btSet("apellido", e.target.value)} />
-          </div>
-          <div>
-            <div className="fieldLabel">DNI *</div>
-            <input className={cls("input", btErrors.dni && "inputError")} value={bt.dni} onChange={(e) => btSet("dni", e.target.value.replace(/\D/g, ""))} inputMode="numeric" />
-          </div>
-          <div>
-            <div className="fieldLabel">Nacionalidad</div>
-            <input className="input" value={bt.nacionalidad} onChange={(e) => btSet("nacionalidad", e.target.value)} placeholder="(opcional)" />
-          </div>
-          <div>
-            <div className="fieldLabel">Estado civil</div>
-            <select className="input" value={bt.estado_civil} onChange={(e) => btSet("estado_civil", e.target.value)}>
-              <option value="">(opcional)</option>
-              {BT_ESTADO_CIVIL.map((x) => <option key={x} value={x}>{x}</option>)}
-            </select>
-          </div>
-        </div>
-      </div>
-    </details>
-
-    <details className="acc">
-      <summary className="accSum">2) Contacto y ubicación</summary>
-      <div className="accBody">
-        <div className="grid2">
-          <div>
-            <div className="fieldLabel">Teléfono *</div>
-            <input className={cls("input", btErrors.telefono && "inputError")} value={bt.telefono} onChange={(e) => btSet("telefono", e.target.value)} inputMode="tel" />
-          </div>
-          <div>
-            <div className="fieldLabel">Correo electrónico *</div>
-            <input className={cls("input", btErrors.correo && "inputError")} value={bt.correo} onChange={(e) => btSet("correo", e.target.value)} inputMode="email" />
-          </div>
-          <div>
-            <div className="fieldLabel">Localidad *</div>
-            <input className={cls("input", btErrors.localidad && "inputError")} value={bt.localidad} onChange={(e) => btSet("localidad", e.target.value)} placeholder="Ej: Campana" />
-          </div>
-          <div>
-            <div className="fieldLabel">Dirección</div>
-            <input className="input" value={bt.direccion} onChange={(e) => btSet("direccion", e.target.value)} placeholder="(opcional)" />
-          </div>
-        </div>
-      </div>
-    </details>
-
-    <details className="acc">
-      <summary className="accSum">3) Perfil laboral (cascada)</summary>
-      <div className="accBody">
-        <div className="grid2">
-          <div>
-            <div className="fieldLabel">Área de trabajo / Rubro *</div>
-            <select className={cls("input", btErrors.area_trabajo && "inputError")} value={bt.area_trabajo} onChange={(e) => btSelectArea(e.target.value)}>
-              <option value="">Seleccionar…</option>
-              {BT_AREAS.map((a) => <option key={a.value} value={a.value}>{a.label}</option>)}
-            </select>
-          </div>
-
-          {btNeedsNivel ? (
-            <div>
-              <div className="fieldLabel">Nivel *</div>
-              <select className={cls("input", btErrors.nivel && "inputError")} value={bt.nivel} onChange={(e) => btSet("nivel", e.target.value)}>
-                <option value="">Seleccionar…</option>
-                {BT_NIVEL.map((x) => <option key={x} value={x}>{x}</option>)}
-              </select>
+          <section className="card">
+            <div className="rowBetween">
+              <div className="cardTitle">Bolsa de Trabajo</div>
+              <div className="filterRow" style={{ gap: 8 }}>
+                <button className={cls("chip", bolsaMode === "alta" && "chipActive")} onClick={() => setBolsaMode("alta")}>Alta</button>
+                <button
+                  className={cls("chip", bolsaMode === "buscar" && "chipActive")}
+                  onClick={() => {
+                    setBolsaMode("buscar");
+                    setJobsErr("");
+                    setJobsItems([]);
+                    setJobsSelected(null);
+                    loadJobsStats();
+                  }}
+                >
+                  Buscar CV
+                </button>
+              </div>
             </div>
-          ) : null}
 
-          <div style={{ gridColumn: "1 / -1" }}>
-            <div className="fieldLabel">Especialidad / Puesto / Formación laboral *</div>
-            {!bt.area_trabajo ? (
-              <div className="muted" style={{ fontSize: 12 }}>Primero seleccioná el Área de trabajo.</div>
+            {bolsaMode === "alta" ? (
+              <>
+                <div className="muted" style={{ marginTop: 6 }}>
+                  Completá el formulario con la menor escritura posible (listas desplegables). Campos obligatorios con <b>*</b>.
+                </div>
+
+                {candErr && <div className="error" style={{ marginTop: 10 }}>{candErr}</div>}
+                {candOk && <div className="ok" style={{ marginTop: 10 }}>{candOk}</div>}
+
+                <details open style={{ marginTop: 10 }}>
+                  <summary><b>1) Datos personales</b></summary>
+                  <div className="formGrid" style={{ marginTop: 10 }}>
+                    <label>
+                      Nombre*<br />
+                      <input value={cand.nombre} onChange={(e) => setCand((p) => ({ ...p, nombre: e.target.value }))} />
+                    </label>
+                    <label>
+                      Apellido*<br />
+                      <input value={cand.apellido} onChange={(e) => setCand((p) => ({ ...p, apellido: e.target.value }))} />
+                    </label>
+                    <label>
+                      DNI* (solo números)<br />
+                      <input value={cand.dni} onChange={(e) => setCand((p) => ({ ...p, dni: e.target.value.replace(/\D+/g, "") }))} inputMode="numeric" />
+                    </label>
+                    <label>
+                      Nacionalidad*<br />
+                      <select value={cand.nacionalidad} onChange={(e) => setCand((p) => ({ ...p, nacionalidad: e.target.value }))}>
+                        {NACIONALIDAD.map((x) => <option key={x} value={x}>{x}</option>)}
+                      </select>
+                    </label>
+                    <label>
+                      Estado civil*<br />
+                      <select value={cand.estado_civil} onChange={(e) => setCand((p) => ({ ...p, estado_civil: e.target.value }))}>
+                        <option value="">Seleccionar…</option>
+                        {ESTADO_CIVIL.map((x) => <option key={x} value={x}>{x}</option>)}
+                      </select>
+                    </label>
+                    <label>
+                      Hijos*<br />
+                      <select value={cand.hijos} onChange={(e) => setCand((p) => ({ ...p, hijos: e.target.value }))}>
+                        <option value="">Seleccionar…</option>
+                        {HIJOS_OPC.map((x) => <option key={x} value={x}>{x}</option>)}
+                      </select>
+                    </label>
+                  </div>
+                </details>
+
+                <details open style={{ marginTop: 10 }}>
+                  <summary><b>2) Contacto y ubicación</b></summary>
+                  <div className="formGrid" style={{ marginTop: 10 }}>
+                    <label>
+                      Teléfono*<br />
+                      <input value={cand.telefono} onChange={(e) => setCand((p) => ({ ...p, telefono: e.target.value }))} inputMode="tel" />
+                    </label>
+                    <label>
+                      Correo*<br />
+                      <input value={cand.correo} onChange={(e) => setCand((p) => ({ ...p, correo: e.target.value }))} inputMode="email" />
+                    </label>
+                    <label>
+                      Localidad*<br />
+                      <input list="locs" value={cand.localidad} onChange={(e) => setCand((p) => ({ ...p, localidad: e.target.value }))} placeholder="Ej: Campana" />
+                      <datalist id="locs">
+                        {LOCALIDADES.map((x) => <option key={x} value={x} />)}
+                      </datalist>
+                    </label>
+                    <label>
+                      Dirección (opcional)<br />
+                      <input value={cand.direccion} onChange={(e) => setCand((p) => ({ ...p, direccion: e.target.value }))} />
+                    </label>
+                  </div>
+                </details>
+
+                <details open style={{ marginTop: 10 }}>
+                  <summary><b>3) Perfil laboral</b></summary>
+                  <div className="formGrid" style={{ marginTop: 10 }}>
+                    <label>
+                      Área de trabajo*<br />
+                      <select value={cand.area_trabajo} onChange={(e) => setCand((p) => ({ ...p, area_trabajo: e.target.value }))}>
+                        <option value="">Seleccionar…</option>
+                        {AREA_TRABAJO.map((x) => <option key={x} value={x}>{x}</option>)}
+                      </select>
+                    </label>
+
+                    {(cand.area_trabajo === "Eléctrica (Industrial)" || cand.area_trabajo === "Mecánica (Industrial)") && (
+                      <label>
+                        Nivel*<br />
+                        <select value={cand.nivel} onChange={(e) => setCand((p) => ({ ...p, nivel: e.target.value }))}>
+                          <option value="">Seleccionar…</option>
+                          {NIVEL_ELECTRO_MEC.map((x) => <option key={x} value={x}>{x}</option>)}
+                        </select>
+                      </label>
+                    )}
+
+                    <label>
+                      Especialidad*<br />
+                      <select value={cand.especialidad} onChange={(e) => setCand((p) => ({ ...p, especialidad: e.target.value }))}>
+                        <option value="">Seleccionar…</option>
+                        {(ESPECIALIDADES[cand.area_trabajo] || ["Otros"]).map((x) => <option key={x} value={x}>{x}</option>)}
+                      </select>
+                    </label>
+
+                    {cand.especialidad === "Otros" && (
+                      <label>
+                        Otros (especificar)*<br />
+                        <input value={cand.especialidad_otro} onChange={(e) => setCand((p) => ({ ...p, especialidad_otro: e.target.value }))} maxLength={60} />
+                      </label>
+                    )}
+                  
+                  {/* Multi-selección de equipos relevantes (para perfilar expertise) */}
+                  {cand.area_trabajo === "Mecánica (Industrial)" && (
+                    <div style={{ gridColumn: "1 / -1", marginTop: 6 }}>
+                      <div style={{ fontWeight: 700, marginBottom: 6 }}>Máquinas-herramienta / equipos (tildá lo que sabés usar)</div>
+                      <div className="checkGrid">
+                        {MAQ_HERR_MECANICA.map((x) => (
+                          <label key={x} className="checkItem">
+                            <input
+                              type="checkbox"
+                              checked={(cand.herramientas_mecanica || []).includes(x)}
+                              onChange={(e) => {
+                                const on = e.target.checked;
+                                setCand((p) => {
+                                  const curr = new Set(p.herramientas_mecanica || []);
+                                  if (on) curr.add(x); else curr.delete(x);
+                                  return { ...p, herramientas_mecanica: Array.from(curr) };
+                                });
+                              }}
+                            />
+                            <span>{x}</span>
+                          </label>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {cand.area_trabajo === "Eléctrica (Industrial)" && (
+                    <div style={{ gridColumn: "1 / -1", marginTop: 6 }}>
+                      <div style={{ fontWeight: 700, marginBottom: 6 }}>Instrumentos / equipos de medición (tildá lo que sabés usar)</div>
+                      <div className="checkGrid">
+                        {INSTR_ELECTRICA.map((x) => (
+                          <label key={x} className="checkItem">
+                            <input
+                              type="checkbox"
+                              checked={(cand.instrumentos_electrica || []).includes(x)}
+                              onChange={(e) => {
+                                const on = e.target.checked;
+                                setCand((p) => {
+                                  const curr = new Set(p.instrumentos_electrica || []);
+                                  if (on) curr.add(x); else curr.delete(x);
+                                  return { ...p, instrumentos_electrica: Array.from(curr) };
+                                });
+                              }}
+                            />
+                            <span>{x}</span>
+                          </label>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+</div>
+                </details>
+
+                <details open style={{ marginTop: 10 }}>
+                  <summary><b>4) Experiencia y formación</b></summary>
+                  <div className="formGrid" style={{ marginTop: 10 }}>
+                    <label>
+                      Años de experiencia*<br />
+                      <select value={cand.rango_experiencia} onChange={(e) => setCand((p) => ({ ...p, rango_experiencia: e.target.value }))}>
+                        <option value="">Seleccionar…</option>
+                        {RANGO_EXP.map((x) => <option key={x} value={x}>{x}</option>)}
+                      </select>
+                    </label>
+                    <label>
+                      Nivel educativo*<br />
+                      <select value={cand.nivel_educativo} onChange={(e) => setCand((p) => ({ ...p, nivel_educativo: e.target.value }))}>
+                        <option value="">Seleccionar…</option>
+                        {NIVEL_EDU.map((x) => <option key={x} value={x}>{x}</option>)}
+                      </select>
+                    </label>
+                    <label>
+                      ¿Tiene capacitación de formación laboral?*<br />
+                      <select value={cand.tiene_capacitacion} onChange={(e) => setCand((p) => ({ ...p, tiene_capacitacion: e.target.value }))}>
+                        <option value="no">No</option>
+                        <option value="si">Sí</option>
+                      </select>
+                    </label>
+                  </div>
+                </details>
+
+                <details open style={{ marginTop: 10 }}>
+                  <summary><b>5) Situación y preferencias</b></summary>
+                  <div className="formGrid" style={{ marginTop: 10 }}>
+                    <label>
+                      ¿Trabaja actualmente?*<br />
+                      <select value={cand.trabaja_actualmente} onChange={(e) => setCand((p) => ({ ...p, trabaja_actualmente: e.target.value }))}>
+                        <option value="no">No</option>
+                        <option value="si">Sí</option>
+                      </select>
+                    </label>
+                    <label>
+                      Sueldo pretendido (opcional)<br />
+                      <input value={cand.sueldo_pretendido} onChange={(e) => setCand((p) => ({ ...p, sueldo_pretendido: e.target.value }))} inputMode="numeric" />
+                    </label>
+                    <label>
+                      Último trabajo (opcional)<br />
+                      <input value={cand.ultimo_trabajo} onChange={(e) => setCand((p) => ({ ...p, ultimo_trabajo: e.target.value.slice(0, 80) }))} maxLength={80} />
+                    </label>
+                    <label>
+                      Observaciones (opcional, máx 300)
+                      <textarea value={cand.observaciones} onChange={(e) => setCand((p) => ({ ...p, observaciones: e.target.value.slice(0, 300) }))} maxLength={300} />
+                    </label>
+                  </div>
+                </details>
+
+                <div className="rowBetween" style={{ marginTop: 12 }}>
+                  <button className="btnPrimary" disabled={candBusy} onClick={submitCandidate}>
+                    {candBusy ? "Enviando…" : "Enviar registro"}
+                  </button>
+                  <div className="muted" style={{ fontSize: 12 }}>
+                    Al enviar, aceptás que UIC use estos datos solo para fines de intermediación laboral.
+                  </div>
+                </div>
+              </>
             ) : (
               <>
-                <div className="searchRow" style={{ marginTop: 6 }}>
-                  <input className="input" placeholder="Buscar especialidad…" value={btSpecQuery} onChange={(e) => setBtSpecQuery(e.target.value)} />
-                  <button className="btnSecondary" onClick={() => setBtSpecQuery("")}>Limpiar</button>
+                <div className="muted" style={{ marginTop: 6 }}>
+                  Acceso protegido: solo socios logueados o administrador. Permite filtrar y ver CV cargados.
                 </div>
 
-                <div className="chipsWrap" style={{ marginTop: 8 }}>
-                  {btFilteredSpecs.map((x) => (
-                    <button
-                      key={x}
-                      className={cls("chip", bt.especialidad === x && "chipActive")}
-                      onClick={() => btPickSpecialty(x)}
-                      type="button"
-                    >
-                      {x}
-                    </button>
-                  ))}
-                </div>
-
-                <div className="muted" style={{ fontSize: 12, marginTop: 8 }}>
-                  Seleccionado: <b>{bt.especialidad || "—"}</b>
-                </div>
-
-                {btErrors.especialidad ? <div className="errorText">{btErrors.especialidad}</div> : null}
-
-                {bt.especialidad === "Otros" ? (
-                  <div style={{ marginTop: 10 }}>
-                    <div className="fieldLabel">Otros – especificar *</div>
-                    <input
-                      className={cls("input", btErrors.especialidad_otro && "inputError")}
-                      value={bt.especialidad_otro}
-                      onChange={(e) => btSet("especialidad_otro", e.target.value)}
-                      placeholder="Escribí corto (3–60)"
-                      maxLength={60}
-                    />
-                    {btErrors.especialidad_otro ? <div className="errorText">{btErrors.especialidad_otro}</div> : null}
+                {!adminToken && !memberToken && (
+                  <div className="alert" style={{ marginTop: 10 }}>
+                    Para buscar CV, ingresá como <b>socio</b> (Portal del Socio) o activá <b>Admin</b> en Ajustes.
                   </div>
-                ) : null}
+                )}
+
+                {jobsErr && <div className="error" style={{ marginTop: 10 }}>{jobsErr}</div>}
+
+                <div className="formGrid" style={{ marginTop: 10 }}>
+                  <label>
+                    Buscar (nombre, DNI, especialidad…)<br />
+                    <input value={jobsQ} onChange={(e) => setJobsQ(e.target.value)} placeholder="Ej: soldador, 30123456" />
+                  </label>
+                  <label>
+                    Área (opcional)<br />
+                    <select value={jobsArea} onChange={(e) => setJobsArea(e.target.value)}>
+                      <option value="">Todas</option>
+                      {AREA_TRABAJO.map((x) => <option key={x} value={x}>{x}</option>)}
+                    </select>
+                  </label>
+                  <label>
+                    Localidad (opcional)<br />
+                    <input list="locs2" value={jobsLoc} onChange={(e) => setJobsLoc(e.target.value)} placeholder="Ej: Campana" />
+                    <datalist id="locs2">{LOCALIDADES.map((x) => <option key={x} value={x} />)}</datalist>
+                  </label>
+                </div>
+
+                <div className="rowBetween" style={{ marginTop: 10 }}>
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <button className="btnPrimary" disabled={jobsBusy} onClick={searchJobs}>{jobsBusy ? "Buscando…" : "Buscar"}</button>
+                    <button className="btnSecondary" disabled={jobsBusy} onClick={loadJobsStats}>Actualizar</button>
+                  </div>
+                  <button className="btnSecondary" disabled={!adminToken} onClick={exportJobsTsv}>
+                    Descargar Excel
+                  </button>
+                </div>
+
+                {jobsStats && (
+                  <div className="alert" style={{ marginTop: 10 }}>
+                    Registrados: <b>{jobsStats.total || 0}</b>
+                  </div>
+                )}
+
+                
+{jobsStats && (
+                  <div className="card" style={{ marginTop: 10 }}>
+                    <div className="cardTitle">Registros — Tablero</div>
+                    <div className="muted" style={{ marginTop: 6 }}>
+                      Totales por sección (mostramos <b>0</b> donde no hay registros).
+                    </div>
+
+                    <details open style={{ marginTop: 10 }}>
+                      <summary><b>Sección 1</b> — Datos personales</summary>
+                      <div className="grid2" style={{ marginTop: 10 }}>
+                        <div>
+                          <div className="muted">Nacionalidad</div>
+                          <div className="miniList">
+                            {sortedFacetEntries("nacionalidad").slice(0, 20).map(([k,v]) => (
+                              <div key={k} className="miniRow"><span>{k}</span><b>{v||0}</b></div>
+                            ))}
+                          </div>
+                        </div>
+                        <div>
+                          <div className="muted">Estado civil</div>
+                          <div className="miniList">
+                            {ESTADO_CIVIL.map((k) => (
+                              <div key={k} className="miniRow"><span>{k}</span><b>{facetCount("estado_civil", k)}</b></div>
+                            ))}
+                          </div>
+
+                          <div className="muted" style={{ marginTop: 10 }}>Hijos</div>
+                          <div className="miniList">
+                            {HIJOS_OPC.map((k) => (
+                              <div key={k} className="miniRow"><span>{k}</span><b>{facetCount("hijos", k)}</b></div>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+                    </details>
+
+                    <details style={{ marginTop: 10 }}>
+                      <summary><b>Sección 2</b> — Ubicación</summary>
+                      <div className="muted" style={{ marginTop: 8 }}>Localidad</div>
+                      <div className="miniList" style={{ maxHeight: 260, overflow: "auto" }}>
+                        {LOCALIDADES.map((k) => (
+                          <div key={k} className="miniRow"><span>{k}</span><b>{facetCount("localidad", k)}</b></div>
+                        ))}
+                      </div>
+                    </details>
+
+                    <details style={{ marginTop: 10 }}>
+                      <summary><b>Sección 3</b> — Perfil laboral</summary>
+
+                      <div className="muted" style={{ marginTop: 8 }}>Área de trabajo</div>
+                      <div className="miniList" style={{ maxHeight: 260, overflow: "auto" }}>
+                        {AREA_TRABAJO.map((k) => (
+                          <div key={k} className="miniRow"><span>{k}</span><b>{facetCount("area_trabajo", k)}</b></div>
+                        ))}
+                      </div>
+
+                      <div className="muted" style={{ marginTop: 10 }}>Nivel (solo Eléctrica/Mecánica)</div>
+                      <div className="miniList">
+                        {NIVEL_ELECTRO_MEC.map((k) => (
+                          <div key={k} className="miniRow"><span>{k}</span><b>{facetCount("nivel", k)}</b></div>
+                        ))}
+                      </div>
+
+                      <div className="muted" style={{ marginTop: 10 }}>Especialidades (Top 15)</div>
+                      <div className="miniList">
+                        {sortedFacetEntries("especialidad").slice(0, 15).map(([k,v]) => (
+                          <div key={k} className="miniRow"><span>{k}</span><b>{v||0}</b></div>
+                        ))}
+                      </div>
+                    </details>
+
+                    <details style={{ marginTop: 10 }}>
+                      <summary><b>Sección 4</b> — Experiencia y formación</summary>
+
+                      <div className="muted" style={{ marginTop: 8 }}>Años de experiencia</div>
+                      <div className="miniList">
+                        {RANGO_EXP.map((k) => (
+                          <div key={k} className="miniRow"><span>{k}</span><b>{facetCount("rango_experiencia", k)}</b></div>
+                        ))}
+                      </div>
+
+                      <div className="muted" style={{ marginTop: 10 }}>Nivel educativo</div>
+                      <div className="miniList">
+                        {NIVEL_EDU.map((k) => (
+                          <div key={k} className="miniRow"><span>{k}</span><b>{facetCount("nivel_educativo", k)}</b></div>
+                        ))}
+                      </div>
+
+                      <div className="grid2" style={{ marginTop: 10 }}>
+                        <div>
+                          <div className="muted">Capacitación</div>
+                          <div className="miniList">
+                            {["SI","NO"].map((k) => (
+                              <div key={k} className="miniRow"><span>{k}</span><b>{facetCount("tiene_capacitacion", k)}</b></div>
+                            ))}
+                          </div>
+                        </div>
+                        <div>
+                          <div className="muted">Trabaja actualmente</div>
+                          <div className="miniList">
+                            {["SI","NO"].map((k) => (
+                              <div key={k} className="miniRow"><span>{k}</span><b>{facetCount("trabaja_actualmente", k)}</b></div>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+                    </details>
+
+                  </div>
+                )}
+
+
+                {jobsItems?.length > 0 && (
+                  <div className="postsList" style={{ marginTop: 10 }}>
+                    {jobsItems.map((it) => (
+                      <div key={it.id} className="postRow" role="button" onClick={() => setJobsSelected(it)}>
+                        <div className="postRowTitle">{it.apellido}, {it.nombre} — {it.area_trabajo}</div>
+                        <div className="postRowExcerpt">{it.localidad} • {it.especialidad === "Otros" ? (it.especialidad_otro || "Otros") : it.especialidad} • Exp: {it.rango_experiencia}</div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {jobsItems?.length === 0 && !jobsBusy && (
+                  <div className="muted" style={{ marginTop: 10 }}>No hay resultados.</div>
+                )}
+
+                {jobsSelected && (
+                  <div className="modalOverlay" onClick={() => setJobsSelected(null)}>
+                    <div className="modal" onClick={(e) => e.stopPropagation()}>
+                      <div className="rowBetween">
+                        <b>{jobsSelected.apellido}, {jobsSelected.nombre}</b>
+                        <button className="btnSecondary" onClick={() => setJobsSelected(null)}>Cerrar</button>
+                      </div>
+                      <div className="muted" style={{ marginTop: 6 }}>
+                        {jobsSelected.area_trabajo}{jobsSelected.nivel ? ` • ${jobsSelected.nivel}` : ""}
+                      </div>
+                      <div style={{ marginTop: 10, lineHeight: 1.35 }}>
+                        <div><b>DNI:</b> {jobsSelected.dni}</div>
+                        <div><b>Nacionalidad:</b> {jobsSelected.nacionalidad} • <b>Estado civil:</b> {jobsSelected.estado_civil} • <b>Hijos:</b> {jobsSelected.hijos}</div>
+                        <div><b>Contacto:</b> {jobsSelected.telefono} • {jobsSelected.correo}</div>
+                        <div><b>Ubicación:</b> {jobsSelected.localidad}{jobsSelected.direccion ? ` • ${jobsSelected.direccion}` : ""}</div>
+                        <div><b>Especialidad:</b> {jobsSelected.especialidad === "Otros" ? (jobsSelected.especialidad_otro || "Otros") : jobsSelected.especialidad}</div>
+                        <div><b>Experiencia:</b> {jobsSelected.rango_experiencia} • <b>Educación:</b> {jobsSelected.nivel_educativo}</div>
+                        <div><b>Capacitación:</b> {jobsSelected.tiene_capacitacion ? "Sí" : "No"} • <b>Trabaja:</b> {jobsSelected.trabaja_actualmente ? "Sí" : "No"}</div>
+                        {jobsSelected.sueldo_pretendido && <div><b>Sueldo:</b> {jobsSelected.sueldo_pretendido}</div>}
+                        {jobsSelected.ultimo_trabajo && <div><b>Último trabajo:</b> {jobsSelected.ultimo_trabajo}</div>}
+                        {jobsSelected.observaciones && <div style={{ marginTop: 6 }}><b>Obs:</b> {jobsSelected.observaciones}</div>}
+                      </div>
+                    </div>
+                  </div>
+                )}
               </>
             )}
-          </div>
-
-          <div style={{ gridColumn: "1 / -1" }}>
-            <button className="btnSecondary" onClick={btResetCascade} type="button">
-              Restablecer (nivel/especialidad)
-            </button>
-          </div>
-        </div>
-      </div>
-    </details>
-
-    <details className="acc">
-      <summary className="accSum">4) Experiencia y formación</summary>
-      <div className="accBody">
-        <div className="grid2">
-          <div>
-            <div className="fieldLabel">Años de experiencia *</div>
-            <select className={cls("input", btErrors.rango_experiencia && "inputError")} value={bt.rango_experiencia} onChange={(e) => btSet("rango_experiencia", e.target.value)}>
-              <option value="">Seleccionar…</option>
-              {BT_RANGO_EXP.map((x) => <option key={x} value={x}>{x}</option>)}
-            </select>
-          </div>
-          <div>
-            <div className="fieldLabel">Nivel educativo *</div>
-            <select className={cls("input", btErrors.nivel_educativo && "inputError")} value={bt.nivel_educativo} onChange={(e) => btSet("nivel_educativo", e.target.value)}>
-              <option value="">Seleccionar…</option>
-              {BT_NIVEL_EDU.map((x) => <option key={x} value={x}>{x}</option>)}
-            </select>
-          </div>
-          <div>
-            <div className="fieldLabel">¿Tiene capacitación de formación laboral? *</div>
-            <div className="segRow">
-              <button className={cls("segBtn", bt.tiene_capacitacion === "si" && "segActive")} onClick={() => btSet("tiene_capacitacion", "si")} type="button">Sí</button>
-              <button className={cls("segBtn", bt.tiene_capacitacion === "no" && "segActive")} onClick={() => btSet("tiene_capacitacion", "no")} type="button">No</button>
-            </div>
-            {btErrors.tiene_capacitacion ? <div className="errorText">{btErrors.tiene_capacitacion}</div> : null}
-          </div>
-        </div>
-      </div>
-    </details>
-
-    <details className="acc">
-      <summary className="accSum">5) Situación y preferencias</summary>
-      <div className="accBody">
-        <div className="grid2">
-          <div>
-            <div className="fieldLabel">¿Trabaja actualmente? *</div>
-            <div className="segRow">
-              <button className={cls("segBtn", bt.trabaja_actualmente === "si" && "segActive")} onClick={() => btSet("trabaja_actualmente", "si")} type="button">Sí</button>
-              <button className={cls("segBtn", bt.trabaja_actualmente === "no" && "segActive")} onClick={() => btSet("trabaja_actualmente", "no")} type="button">No</button>
-            </div>
-            {btErrors.trabaja_actualmente ? <div className="errorText">{btErrors.trabaja_actualmente}</div> : null}
-          </div>
-
-          <div>
-            <div className="fieldLabel">Sueldo pretendido</div>
-            <input className={cls("input", btErrors.sueldo_pretendido && "inputError")} value={bt.sueldo_pretendido} onChange={(e) => btSet("sueldo_pretendido", e.target.value.replace(/\D/g, ""))} inputMode="numeric" placeholder="(opcional)" />
-            {btErrors.sueldo_pretendido ? <div className="errorText">{btErrors.sueldo_pretendido}</div> : null}
-          </div>
-
-          <div style={{ gridColumn: "1 / -1" }}>
-            <div className="fieldLabel">¿Dónde trabajó por última vez?</div>
-            <input className={cls("input", btErrors.ultimo_trabajo && "inputError")} value={bt.ultimo_trabajo} onChange={(e) => btSet("ultimo_trabajo", e.target.value)} maxLength={80} placeholder="(opcional, 80 máx.)" />
-            {btErrors.ultimo_trabajo ? <div className="errorText">{btErrors.ultimo_trabajo}</div> : null}
-          </div>
-
-          <div style={{ gridColumn: "1 / -1" }}>
-            <div className="fieldLabel">Observaciones</div>
-            <textarea className={cls("input", btErrors.observaciones && "inputError")} value={bt.observaciones} onChange={(e) => btSet("observaciones", e.target.value)} maxLength={300} rows={3} placeholder="(opcional, 300 máx.)" />
-            {btErrors.observaciones ? <div className="errorText">{btErrors.observaciones}</div> : null}
-          </div>
-        </div>
-      </div>
-    </details>
-
-    <div style={{ marginTop: 12 }}>
-      <button className="btnPrimary" onClick={btSubmitDraft} type="button">
-        Guardar perfil
-      </button>
-      <div className="muted" style={{ fontSize: 12, marginTop: 8 }}>
-        En esta etapa el perfil queda guardado en el dispositivo. Próxima etapa: envío a la base y búsqueda por empresas.
-      </div>
-    </div>
-
-    {btToast2 ? (
-      <div className="toast" style={{ marginTop: 10 }}>
-        <div className="toastText">{btToast2}</div>
-      </div>
-    ) : null}
-  </section>
-)}
+          </section>
+        )}
 
 {tab === "manual" && (
   <section className="card">
@@ -2830,12 +2957,12 @@ async function submitSocioForm() {
   <li><b>Publicaciones</b>: listado completo con búsqueda y filtros.</li>
   <li><b>Pro.Industrial</b>: publicaciones de la categoría “Promoción Industrial”.</li>
   <li><b>Manual</b>: esta ayuda.</li>
-  <li><b>Ajustes</b>: versión, clave admin, login socio, y utilidades (incluye “Bloquear zoom” (por defecto bloqueado)).</li>
+  <li><b>Ajustes</b>: versión, clave admin, login socio, y utilidades (incluye “Bloquear zoom”).</li>
 </ul>
 
 <h3>Inicio (accesos rápidos)</h3>
 <ul>
-  <li><b>Bolsa de trabajo</b>: alta de candidato (MVP) con desplegables y mínimos campos.</li>
+  <li><b>Bolsa de trabajo</b>: acceso al módulo (en desarrollo).</li>
   <li><b>Beneficios</b>: beneficios para socios y comunidad (desde Inicio).</li>
   <li><b>Agenda</b>: eventos y actividades (desde Inicio).</li>
   <li><b>Requerimientos institucionales</b>: acceso protegido por clave (sirve clave de socio o clave admin).</li>
@@ -3908,10 +4035,10 @@ async function submitSocioForm() {
                     });
                   }}
                 >
-                  {zoomLocked ? "Desbloquear zoom" : "Bloquear zoom de pantalla"}
+                  {zoomLocked ? "Desbloquear zoom" : "Bloquear zoom"}
                 </button>
                 <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>
-                  Evita que la pantalla se agrande al escribir o al pellizcar. (Por defecto está bloqueado).
+                  Evita que la pantalla se agrande al escribir o al pellizcar.
                 </div>
 
                 {zoomToast ? (
