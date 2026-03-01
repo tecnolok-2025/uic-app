@@ -2351,7 +2351,7 @@ app.get("/jobs/stats", requireAccess, async (req, res) => {
   try {
     if (!dbReady) {
       const items = (JOBS_STORE?.items || []).slice();
-      return res.json({ ok: true, total: items.length, facets: facetStats(items) });
+      return res.json({ ok: true, total: items.length, ...facetStats(items) });
     }
 
     const r = await pool.query("SELECT * FROM uic_job_candidates");
@@ -2360,7 +2360,7 @@ app.get("/jobs/stats", requireAccess, async (req, res) => {
       created_at: x.created_at ? new Date(x.created_at).toISOString() : "",
       updated_at: x.updated_at ? new Date(x.updated_at).toISOString() : "",
     }));
-    return res.json({ ok: true, total: items.length, facets: facetStats(items) });
+    return res.json({ ok: true, total: items.length, ...facetStats(items) });
   } catch (e) {
     console.log("⚠️ jobs/stats error:", e?.message || e);
     return res.status(500).json({ error: "Error interno" });
@@ -2373,10 +2373,40 @@ app.get("/jobs/search", requireAccess, async (req, res) => {
     const q = String(req.query?.q || "").trim().toLowerCase();
     const area = String(req.query?.area || "").trim();
     const localidad = String(req.query?.localidad || "").trim();
+    const nivel = String(req.query?.nivel || "").trim();
+    const especialidad = String(req.query?.especialidad || "").trim();
+    const rango_experiencia = String(req.query?.rango_experiencia || "").trim();
+    const nivel_educativo = String(req.query?.nivel_educativo || "").trim();
+    const tiene_capacitacion = String(req.query?.tiene_capacitacion || "").trim().toUpperCase(); // SI/NO
+    const trabaja_actualmente = String(req.query?.trabaja_actualmente || "").trim().toUpperCase(); // SI/NO
+    const soldador_categoria = String(req.query?.soldador_categoria || "").trim();
+    const herramienta = String(req.query?.herramienta || "").trim();
+    const instrumento = String(req.query?.instrumento || "").trim();
 
     const filterFn = (it) => {
       if (area && String(it.area_trabajo || "") !== area) return false;
       if (localidad && String(it.localidad || "") !== localidad) return false;
+      if (nivel && String(it.nivel || "") !== nivel) return false;
+      if (rango_experiencia && String(it.rango_experiencia || "") !== rango_experiencia) return false;
+      if (nivel_educativo && String(it.nivel_educativo || "") !== nivel_educativo) return false;
+      if (tiene_capacitacion === "SI" && !it.tiene_capacitacion) return false;
+      if (tiene_capacitacion === "NO" && !!it.tiene_capacitacion) return false;
+      if (trabaja_actualmente === "SI" && !it.trabaja_actualmente) return false;
+      if (trabaja_actualmente === "NO" && !!it.trabaja_actualmente) return false;
+      if (soldador_categoria && String(it.soldador_categoria || "") !== soldador_categoria) return false;
+      if (herramienta) {
+        const arr = Array.isArray(it.herramientas_mecanica) ? it.herramientas_mecanica : (String(it.herramientas_mecanica || "").split(",").map((x)=>x.trim()).filter(Boolean));
+        if (!arr.includes(herramienta)) return false;
+      }
+      if (instrumento) {
+        const arr = Array.isArray(it.instrumentos_electrica) ? it.instrumentos_electrica : (String(it.instrumentos_electrica || "").split(",").map((x)=>x.trim()).filter(Boolean));
+        if (!arr.includes(instrumento)) return false;
+      }
+
+      if (especialidad) {
+        const esp = it.especialidad === "Otros" ? (it.especialidad_otro || "Otros") : (it.especialidad || "");
+        if (String(esp) !== especialidad) return false;
+      }
       if (!q) return true;
       const hay = `${it.nombre || ""} ${it.apellido || ""} ${it.dni || ""} ${it.localidad || ""} ${it.area_trabajo || ""} ${it.especialidad || ""} ${it.especialidad_otro || ""}`.toLowerCase();
       return hay.includes(q);
@@ -2405,6 +2435,51 @@ app.get("/jobs/export", requireAdmin, async (req, res) => {
     else {
       const r = await pool.query("SELECT * FROM uic_job_candidates ORDER BY created_at DESC");
       items = r.rows || [];
+    }
+
+    // Soportar export filtrado por los mismos params de /jobs/search
+    const q = String(req.query?.q || "").trim().toLowerCase();
+    const area = String(req.query?.area || "").trim();
+    const localidad = String(req.query?.localidad || "").trim();
+    const nivel = String(req.query?.nivel || "").trim();
+    const especialidad = String(req.query?.especialidad || "").trim();
+    const rango_experiencia = String(req.query?.rango_experiencia || "").trim();
+    const nivel_educativo = String(req.query?.nivel_educativo || "").trim();
+    const tiene_capacitacion = String(req.query?.tiene_capacitacion || "").trim().toUpperCase();
+    const trabaja_actualmente = String(req.query?.trabaja_actualmente || "").trim().toUpperCase();
+    const soldador_categoria = String(req.query?.soldador_categoria || "").trim();
+    const herramienta = String(req.query?.herramienta || "").trim();
+    const instrumento = String(req.query?.instrumento || "").trim();
+
+    const filterFn = (it) => {
+      if (area && String(it.area_trabajo || "") !== area) return false;
+      if (localidad && String(it.localidad || "") !== localidad) return false;
+      if (nivel && String(it.nivel || "") !== nivel) return false;
+      if (rango_experiencia && String(it.rango_experiencia || "") !== rango_experiencia) return false;
+      if (nivel_educativo && String(it.nivel_educativo || "") !== nivel_educativo) return false;
+      if (tiene_capacitacion === "SI" && !it.tiene_capacitacion) return false;
+      if (tiene_capacitacion === "NO" && !!it.tiene_capacitacion) return false;
+      if (trabaja_actualmente === "SI" && !it.trabaja_actualmente) return false;
+      if (trabaja_actualmente === "NO" && !!it.trabaja_actualmente) return false;
+      if (soldador_categoria && String(it.soldador_categoria || "") !== soldador_categoria) return false;
+      if (herramienta) {
+        const arr = Array.isArray(it.herramientas_mecanica) ? it.herramientas_mecanica : (String(it.herramientas_mecanica || "").split(",").map((x)=>x.trim()).filter(Boolean));
+        if (!arr.includes(herramienta)) return false;
+      }
+      if (instrumento) {
+        const arr = Array.isArray(it.instrumentos_electrica) ? it.instrumentos_electrica : (String(it.instrumentos_electrica || "").split(",").map((x)=>x.trim()).filter(Boolean));
+        if (!arr.includes(instrumento)) return false;
+      }
+      if (especialidad) {
+        const esp = it.especialidad === "Otros" ? (it.especialidad_otro || "Otros") : (it.especialidad || "");
+        if (String(esp) !== especialidad) return false;
+      }
+      if (!q) return true;
+      const hay = `${it.nombre || ""} ${it.apellido || ""} ${it.dni || ""} ${it.localidad || ""} ${it.area_trabajo || ""} ${it.especialidad || ""} ${it.especialidad_otro || ""}`.toLowerCase();
+      return hay.includes(q);
+    };
+    if (q || area || localidad || nivel || especialidad || rango_experiencia || nivel_educativo || tiene_capacitacion || trabaja_actualmente || soldador_categoria || herramienta || instrumento) {
+      items = items.filter(filterFn);
     }
 
     const headers = [
@@ -2482,7 +2557,12 @@ function facetStats(items) {
     nivel_educativo: {},
     tiene_capacitacion: { SI: 0, NO: 0 },
     trabaja_actualmente: { SI: 0, NO: 0 },
+    herramientas_mecanica: {},
+    instrumentos_electrica: {},
   };
+
+  const especialidad_by_area = {}; // { area: { especialidad: count } }
+
   for (const it of items) {
     add(facets.nacionalidad, it.nacionalidad);
     add(facets.estado_civil, it.estado_civil);
@@ -2490,13 +2570,30 @@ function facetStats(items) {
     add(facets.localidad, it.localidad);
     add(facets.area_trabajo, it.area_trabajo);
     if (it.nivel) add(facets.nivel, it.nivel);
-    add(facets.especialidad, it.especialidad === "Otros" ? (it.especialidad_otro || "Otros") : it.especialidad);
+    const esp = it.especialidad === "Otros" ? (it.especialidad_otro || "Otros") : it.especialidad;
+    add(facets.especialidad, esp);
+    if (it.soldador_categoria) add(facets.soldador_categoria, it.soldador_categoria);
     add(facets.rango_experiencia, it.rango_experiencia);
     add(facets.nivel_educativo, it.nivel_educativo);
     facets.tiene_capacitacion[it.tiene_capacitacion ? "SI" : "NO"]++;
     facets.trabaja_actualmente[it.trabaja_actualmente ? "SI" : "NO"]++;
+
+    const areaKey = String(it.area_trabajo || "(vacío)");
+    if (!especialidad_by_area[areaKey]) especialidad_by_area[areaKey] = {};
+    add(especialidad_by_area[areaKey], esp);
+
+    // Arrays (equipos): cuentan cada ítem seleccionado
+    const hm = Array.isArray(it.herramientas_mecanica)
+      ? it.herramientas_mecanica
+      : String(it.herramientas_mecanica || "").split(",").map((x) => x.trim()).filter(Boolean);
+    for (const x of hm) add(facets.herramientas_mecanica, x);
+
+    const ie = Array.isArray(it.instrumentos_electrica)
+      ? it.instrumentos_electrica
+      : String(it.instrumentos_electrica || "").split(",").map((x) => x.trim()).filter(Boolean);
+    for (const x of ie) add(facets.instrumentos_electrica, x);
   }
-  return facets;
+  return { facets, especialidad_by_area };
 }
 
 // Thread messages (member)

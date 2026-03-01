@@ -1,6 +1,6 @@
 {
   "name": "uic-app-api",
-  "version": "0.33.0",
+  "version": "0.34.0",
   "type": "module",
   "main": "index.js",
   "scripts": {

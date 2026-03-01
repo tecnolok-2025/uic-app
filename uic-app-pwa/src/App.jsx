@@ -3,7 +3,7 @@ import "./index.css";
 import logoUIC from "./assets/logo-uic.jpeg";
 
 // Versión visible (footer / ajustes)
-const APP_VERSION = "0.33.0";
+const APP_VERSION = "0.34.0";
 const BUILD_STAMP = (typeof __UIC_BUILD_STAMP__ !== "undefined") ? __UIC_BUILD_STAMP__ : "";
 const PWA_CACHE_ID = (typeof __UIC_CACHE_ID__ !== "undefined") ? __UIC_CACHE_ID__ : "";
 const PWA_COMMIT = (typeof __UIC_COMMIT__ !== "undefined") ? __UIC_COMMIT__ : "";
@@ -410,6 +410,16 @@ const [jobsStats, setJobsStats] = useState(null);
 const [jobsQ, setJobsQ] = useState("");
 const [jobsArea, setJobsArea] = useState("");
 const [jobsLoc, setJobsLoc] = useState("");
+const [jobsNivel, setJobsNivel] = useState("");
+const [jobsEsp, setJobsEsp] = useState("");
+const [jobsExp, setJobsExp] = useState("");
+const [jobsEdu, setJobsEdu] = useState("");
+const [jobsCap, setJobsCap] = useState(""); // SI/NO
+const [jobsTrab, setJobsTrab] = useState(""); // SI/NO
+const [jobsSoldCat, setJobsSoldCat] = useState("");
+const [jobsHerr, setJobsHerr] = useState("");
+const [jobsInstr, setJobsInstr] = useState("");
+const [jobsTabArea, setJobsTabArea] = useState("");
 const [jobsItems, setJobsItems] = useState([]);
 const [jobsErr, setJobsErr] = useState("");
 const [jobsBusy, setJobsBusy] = useState(false);
@@ -627,6 +637,15 @@ const searchJobs = async () => {
     if ((jobsQ || "").trim()) url.searchParams.set("q", (jobsQ || "").trim());
     if (jobsArea) url.searchParams.set("area", jobsArea);
     if (jobsLoc) url.searchParams.set("localidad", jobsLoc);
+    if (jobsNivel) url.searchParams.set("nivel", jobsNivel);
+    if (jobsEsp) url.searchParams.set("especialidad", jobsEsp);
+    if (jobsExp) url.searchParams.set("rango_experiencia", jobsExp);
+    if (jobsEdu) url.searchParams.set("nivel_educativo", jobsEdu);
+    if (jobsCap) url.searchParams.set("tiene_capacitacion", jobsCap);
+    if (jobsTrab) url.searchParams.set("trabaja_actualmente", jobsTrab);
+    if (jobsSoldCat) url.searchParams.set("soldador_categoria", jobsSoldCat);
+    if (jobsHerr) url.searchParams.set("herramienta", jobsHerr);
+    if (jobsInstr) url.searchParams.set("instrumento", jobsInstr);
     const r = await fetch(url.toString(), { headers: jobsAuthHeaders() });
     const j = await r.json().catch(() => ({}));
     if (!r.ok) throw new Error(j?.error || "Error al buscar");
@@ -639,11 +658,27 @@ const searchJobs = async () => {
   }
 };
 
-const exportJobsXlsx = async () => {
+const exportJobsXlsx = async (filtered = false) => {
   if (!API_BASE) return;
   if (!adminToken) { setJobsErr("Solo el administrador puede descargar la base completa."); return; }
   try {
-    const r = await fetch(`${API_BASE}/jobs/export`, { headers: { "x-admin-token": adminToken } });
+    const url = new URL(`${API_BASE}/jobs/export`);
+    if (filtered) {
+      if ((jobsQ || "").trim()) url.searchParams.set("q", (jobsQ || "").trim());
+      if (jobsArea) url.searchParams.set("area", jobsArea);
+      if (jobsLoc) url.searchParams.set("localidad", jobsLoc);
+      if (jobsNivel) url.searchParams.set("nivel", jobsNivel);
+      if (jobsEsp) url.searchParams.set("especialidad", jobsEsp);
+      if (jobsExp) url.searchParams.set("rango_experiencia", jobsExp);
+      if (jobsEdu) url.searchParams.set("nivel_educativo", jobsEdu);
+      if (jobsCap) url.searchParams.set("tiene_capacitacion", jobsCap);
+      if (jobsTrab) url.searchParams.set("trabaja_actualmente", jobsTrab);
+      if (jobsSoldCat) url.searchParams.set("soldador_categoria", jobsSoldCat);
+      if (jobsHerr) url.searchParams.set("herramienta", jobsHerr);
+      if (jobsInstr) url.searchParams.set("instrumento", jobsInstr);
+    }
+
+    const r = await fetch(url.toString(), { headers: { "x-admin-token": adminToken } });
     if (!r.ok) {
       const j = await r.json().catch(() => ({}));
       throw new Error(j?.error || "No se pudo exportar");
@@ -652,7 +687,7 @@ const exportJobsXlsx = async () => {
     const a = document.createElement("a");
     const url = URL.createObjectURL(blob);
     a.href = url;
-    a.download = `uic_bolsa_trabajo_${new Date().toISOString().slice(0,10)}.xlsx`;
+    a.download = `uic_bolsa_trabajo_${filtered ? "filtrado_" : ""}${new Date().toISOString().slice(0,10)}.xlsx`;
     document.body.appendChild(a);
     a.click();
     a.remove();
@@ -2786,6 +2821,78 @@ async function submitSocioForm() {
                     <input list="locs2" value={jobsLoc} onChange={(e) => setJobsLoc(e.target.value)} placeholder="Ej: Campana" />
                     <datalist id="locs2">{LOCALIDADES.map((x) => <option key={x} value={x} />)}</datalist>
                   </label>
+
+                  <label>
+                    Nivel (opcional)<br />
+                    <select value={jobsNivel} onChange={(e) => setJobsNivel(e.target.value)}>
+                      <option value="">(cualquiera)</option>
+                      {NIVEL_ELECTRO_MEC.map((x) => <option key={x} value={x}>{x}</option>)}
+                    </select>
+                  </label>
+
+                  <label>
+                    Experiencia (opcional)<br />
+                    <select value={jobsExp} onChange={(e) => setJobsExp(e.target.value)}>
+                      <option value="">(cualquiera)</option>
+                      {RANGO_EXP.map((x) => <option key={x} value={x}>{x}</option>)}
+                    </select>
+                  </label>
+
+                  <label>
+                    Educación (opcional)<br />
+                    <select value={jobsEdu} onChange={(e) => setJobsEdu(e.target.value)}>
+                      <option value="">(cualquiera)</option>
+                      {NIVEL_EDU.map((x) => <option key={x} value={x}>{x}</option>)}
+                    </select>
+                  </label>
+
+                  <label>
+                    Capacitación (opcional)<br />
+                    <select value={jobsCap} onChange={(e) => setJobsCap(e.target.value)}>
+                      <option value="">(cualquiera)</option>
+                      <option value="SI">Sí</option>
+                      <option value="NO">No</option>
+                    </select>
+                  </label>
+
+                  <label>
+                    Trabaja actualmente (opcional)<br />
+                    <select value={jobsTrab} onChange={(e) => setJobsTrab(e.target.value)}>
+                      <option value="">(cualquiera)</option>
+                      <option value="SI">Sí</option>
+                      <option value="NO">No</option>
+                    </select>
+                  </label>
+
+                  <label>
+                    Especialidad exacta (opcional)<br />
+                    <input value={jobsEsp} onChange={(e) => setJobsEsp(e.target.value)} placeholder="Ej: Soldador MIG/MAG" />
+                    <div className="muted" style={{ marginTop: 4 }}>Tip: podés usar “Buscar” arriba si querés texto libre.</div>
+                  </label>
+
+                  <label>
+                    Soldador: categoría (opcional)<br />
+                    <select value={jobsSoldCat} onChange={(e) => setJobsSoldCat(e.target.value)}>
+                      <option value="">(cualquiera)</option>
+                      {SOLDADOR_CATEGORIAS.map((x) => <option key={x} value={x}>{x}</option>)}
+                    </select>
+                  </label>
+
+                  <label>
+                    Máquina herramienta (Mecánica) (opcional)<br />
+                    <select value={jobsHerr} onChange={(e) => setJobsHerr(e.target.value)}>
+                      <option value="">(cualquiera)</option>
+                      {HERRAMIENTAS_MECANICA.map((x) => <option key={x} value={x}>{x}</option>)}
+                    </select>
+                  </label>
+
+                  <label>
+                    Instrumento (Eléctrica) (opcional)<br />
+                    <select value={jobsInstr} onChange={(e) => setJobsInstr(e.target.value)}>
+                      <option value="">(cualquiera)</option>
+                      {INSTRUMENTOS_ELECTRICA.map((x) => <option key={x} value={x}>{x}</option>)}
+                    </select>
+                  </label>
                 </div>
 
                 <div className="rowBetween" style={{ marginTop: 10 }}>
@@ -2793,9 +2900,19 @@ async function submitSocioForm() {
                     <button className="btnPrimary" disabled={jobsBusy} onClick={searchJobs}>{jobsBusy ? "Buscando…" : "Buscar"}</button>
                     <button className="btnSecondary" disabled={jobsBusy} onClick={loadJobsStats}>Actualizar</button>
                   </div>
-                  <button className="btnSecondary" disabled={!adminToken} onClick={exportJobsXlsx}>
-                    Descargar Excel
-                  </button>
+                  <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                    <button className="btnSecondary" disabled={!adminToken} onClick={() => exportJobsXlsx(false)}>
+                      Descargar Excel (completo)
+                    </button>
+                    <button
+                      className="btnSecondary"
+                      disabled={!adminToken}
+                      onClick={() => exportJobsXlsx(true)}
+                      title="Exporta respetando los filtros actuales"
+                    >
+                      Excel filtrado
+                    </button>
+                  </div>
                 </div>
 
                 {jobsStats && (
@@ -2874,6 +2991,47 @@ async function submitSocioForm() {
                           <div key={k} className="miniRow"><span>{k}</span><b>{v||0}</b></div>
                         ))}
                       </div>
+
+                      <div className="muted" style={{ marginTop: 12 }}>
+                        Ver especialidades por área (más detallado)
+                      </div>
+                      <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 6 }}>
+                        <select value={jobsTabArea} onChange={(e) => setJobsTabArea(e.target.value)}>
+                          <option value="">(elegí un área)</option>
+                          {AREA_TRABAJO.map((x) => <option key={x} value={x}>{x}</option>)}
+                        </select>
+                        <div className="muted">Muestra 0 si no hay registros en esa especialidad.</div>
+                      </div>
+                      {jobsTabArea && jobsStats?.especialidad_by_area?.[jobsTabArea] && (
+                        <div className="miniList" style={{ maxHeight: 260, overflow: "auto", marginTop: 8 }}>
+                          {Object.entries(jobsStats.especialidad_by_area[jobsTabArea] || {})
+                            .sort((a,b) => (b[1]||0) - (a[1]||0))
+                            .map(([k,v]) => (
+                              <div key={k} className="miniRow"><span>{k}</span><b>{v||0}</b></div>
+                            ))}
+                        </div>
+                      )}
+
+                      <div className="muted" style={{ marginTop: 12 }}>Soldador — categoría</div>
+                      <div className="miniList">
+                        {SOLDADOR_CATEGORIAS.map((k) => (
+                          <div key={k} className="miniRow"><span>{k}</span><b>{facetCount("soldador_categoria", k)}</b></div>
+                        ))}
+                      </div>
+
+                      <div className="muted" style={{ marginTop: 12 }}>Máquinas herramienta (Mecánica)</div>
+                      <div className="miniList" style={{ maxHeight: 220, overflow: "auto" }}>
+                        {HERRAMIENTAS_MECANICA.map((k) => (
+                          <div key={k} className="miniRow"><span>{k}</span><b>{facetCount("herramientas_mecanica", k)}</b></div>
+                        ))}
+                      </div>
+
+                      <div className="muted" style={{ marginTop: 12 }}>Instrumentos (Eléctrica)</div>
+                      <div className="miniList" style={{ maxHeight: 220, overflow: "auto" }}>
+                        {INSTRUMENTOS_ELECTRICA.map((k) => (
+                          <div key={k} className="miniRow"><span>{k}</span><b>{facetCount("instrumentos_electrica", k)}</b></div>
+                        ))}
+                      </div>
                     </details>
 
                     <details style={{ marginTop: 10 }}>
@@ -2948,6 +3106,13 @@ async function submitSocioForm() {
                         <div><b>Contacto:</b> {jobsSelected.telefono} • {jobsSelected.correo}</div>
                         <div><b>Ubicación:</b> {jobsSelected.localidad}{jobsSelected.direccion ? ` • ${jobsSelected.direccion}` : ""}</div>
                         <div><b>Especialidad:</b> {jobsSelected.especialidad === "Otros" ? (jobsSelected.especialidad_otro || "Otros") : jobsSelected.especialidad}</div>
+                        {jobsSelected.soldador_categoria && <div><b>Soldador (cat.):</b> {jobsSelected.soldador_categoria}</div>}
+                        {Array.isArray(jobsSelected.herramientas_mecanica) && jobsSelected.herramientas_mecanica.length > 0 && (
+                          <div><b>Máquinas herramienta:</b> {jobsSelected.herramientas_mecanica.join(", ")}</div>
+                        )}
+                        {Array.isArray(jobsSelected.instrumentos_electrica) && jobsSelected.instrumentos_electrica.length > 0 && (
+                          <div><b>Instrumentos:</b> {jobsSelected.instrumentos_electrica.join(", ")}</div>
+                        )}
                         <div><b>Experiencia:</b> {jobsSelected.rango_experiencia} • <b>Educación:</b> {jobsSelected.nivel_educativo}</div>
                         <div><b>Capacitación:</b> {jobsSelected.tiene_capacitacion ? "Sí" : "No"} • <b>Trabaja:</b> {jobsSelected.trabaja_actualmente ? "Sí" : "No"}</div>
                         {jobsSelected.sueldo_pretendido && <div><b>Sueldo:</b> {jobsSelected.sueldo_pretendido}</div>}
