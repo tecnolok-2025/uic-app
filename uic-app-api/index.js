@@ -2017,8 +2017,25 @@ app.post("/admin/messages/thread/:memberNo/mark-read", requireAdmin, async (req,
 });
 
 app.post("/admin/messages/thread/:memberNo/reply", requireAdmin, async (req, res) => {
-  // Solo lectura: el administrador NO responde desde la app.
-  return res.status(403).json({ error: "Solo lectura: el administrador no responde desde la app" });
+  try {
+    if (__rateLimited(req, res, "admin-msg-reply", 60, 10 * 60 * 1000)) return;
+    const memberNo = parseInt(req.params.memberNo, 10);
+    if (!memberNo) return res.status(400).json({ error: "memberNo inválido" });
+    const message = String(req.body?.message || "").trim();
+    if (!message) return res.status(400).json({ error: "message requerido" });
+
+    const id = "a_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 8);
+    if (dbReady) {
+      await pool.query(
+        "INSERT INTO uic_messages(id, thread_member_no, from_role, message, read_by_admin, read_by_member) VALUES ($1,$2,'admin',$3,TRUE,FALSE)",
+        [id, memberNo, message]
+      );
+    }
+    return res.json({ ok: true, id });
+  } catch (e) {
+    console.log("⚠️ admin/messages/reply error:", e?.message || e);
+    return res.status(500).json({ error: "Error interno" });
+  }
 });
 
 // Thread messages (member)

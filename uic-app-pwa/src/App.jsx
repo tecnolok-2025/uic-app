@@ -3,7 +3,7 @@ import "./index.css";
 import logoUIC from "./assets/logo-uic.jpeg";
 
 // Versión visible (footer / ajustes)
-const APP_VERSION = "0.29.1";
+const APP_VERSION = "0.30.0";
 const BUILD_STAMP = (typeof __UIC_BUILD_STAMP__ !== "undefined") ? __UIC_BUILD_STAMP__ : "";
 const PWA_CACHE_ID = (typeof __UIC_CACHE_ID__ !== "undefined") ? __UIC_CACHE_ID__ : "";
 const PWA_COMMIT = (typeof __UIC_COMMIT__ !== "undefined") ? __UIC_COMMIT__ : "";
@@ -332,6 +332,108 @@ const [memberPwOpen, setMemberPwOpen] = useState(false);
       setAdminMsgThreads([]);
       throw e;
     }
+  }
+
+  // Abre un hilo específico (admin) y marca como leídos los mensajes pendientes del socio.
+  async function openAdminThread(memberNo, companyName) {
+    if (!adminToken) {
+      setMsgsError("Para ver hilos como administrador, activá Admin en Ajustes.");
+      return;
+    }
+    const no = parseInt(memberNo, 10);
+    if (!no) return;
+    setAdminThreadNo(no);
+    setAdminThreadTitle(companyName || "Socio");
+    setMsgsBusy(true);
+    setMsgsError("");
+    try {
+      const r = await fetch(`${API_BASE}/admin/messages/thread/${no}`, {
+        headers: { "x-admin-token": adminToken },
+      });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        setMsgsError(j?.error || "No se pudo abrir el hilo.");
+        setAdminThreadMsgs([]);
+        return;
+      }
+      setAdminThreadMsgs(normalizeMsgs(j?.messages || j?.items));
+      await fetch(`${API_BASE}/admin/messages/thread/${no}/mark-read`, {
+        method: "POST",
+        headers: { "x-admin-token": adminToken },
+      }).catch(() => {});
+      await loadAdminThreads().catch(() => {});
+      await loadMessagesMeta().catch(() => {});
+    } catch (e) {
+      console.error("openAdminThread failed", e);
+      setMsgsError(e?.message || "Error de red al abrir el hilo.");
+      setAdminThreadMsgs([]);
+    } finally {
+      setMsgsBusy(false);
+    }
+  }
+
+  function closeAdminThread() {
+    setAdminThreadNo(null);
+    setAdminThreadTitle("");
+    setAdminThreadMsgs([]);
+  }
+
+  // Respuesta del admin (habilitada en v0.30)
+  const [adminReplyDraft, setAdminReplyDraft] = useState("");
+
+  async function adminSendReply() {
+    if (!adminToken || !adminThreadNo) return;
+    const msg = String(adminReplyDraft || "").trim();
+    if (!msg) return;
+
+    const optimisticId = `tmp-admin-${Date.now()}`;
+    const optimistic = {
+      id: optimisticId,
+      from_role: "admin",
+      body: msg,
+      created_at: new Date().toISOString(),
+      read_by_member: false,
+      read_by_admin: true,
+    };
+    setAdminThreadMsgs((prev) => [optimistic, ...(prev || [])]);
+    setAdminReplyDraft("");
+
+    setMsgsBusy(true);
+    setMsgsError("");
+    try {
+      const r = await fetch(`${API_BASE}/admin/messages/thread/${adminThreadNo}/reply`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-admin-token": adminToken },
+        body: JSON.stringify({ message: msg }),
+      });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        setAdminThreadMsgs((prev) => (prev || []).filter((x) => x?.id !== optimisticId));
+        setMsgsError(j?.error || "No se pudo enviar la respuesta.");
+        return;
+      }
+      // recargar hilo para tener IDs reales y estados
+      await openAdminThread(adminThreadNo, adminThreadTitle);
+    } catch (e) {
+      setAdminThreadMsgs((prev) => (prev || []).filter((x) => x?.id !== optimisticId));
+      setMsgsError(e?.message || "Error de red al responder.");
+    } finally {
+      setMsgsBusy(false);
+    }
+  }
+
+  // Render "tildes" estilo WhatsApp (aproximado con la info disponible)
+  function renderTicks({ delivered, read }) {
+    const txt = delivered ? "✓✓" : "✓";
+    const color = read ? "#36a3ff" : "rgba(255,255,255,0.65)";
+    return (
+      <span
+        style={{ marginLeft: 6, fontSize: 12, color, fontWeight: 800, letterSpacing: "-1px" }}
+        title={read ? "Leído" : delivered ? "Entregado" : "Enviado"}
+      >
+        {txt}
+      </span>
+    );
   }
 
   // Badge del ícono (si el navegador lo soporta): suma agenda hoy + comunicados no vistos + mensajes no leídos
@@ -2158,10 +2260,12 @@ async function submitSocioForm() {
 		          <div className="alert">Para ver mensajes como administrador, activá Admin en Ajustes (guardando la clave admin en este dispositivo).</div>
 		        ) : adminThreadNo ? (
 		          <>
-		            <div className="rowBetween" style={{ gap: 8, alignItems: "center" }}>
+		        	  <div className="rowBetween" style={{ gap: 8, alignItems: "center" }}>
 		              <div>
 		                <div style={{ fontWeight: 800 }}>{adminThreadTitle || "Socio"} <span className="muted">(#{adminThreadNo})</span></div>
-		                <div className="muted" style={{ fontSize: 12 }}>Solo lectura (por ahora). El socio sí puede enviar.</div>
+		        	      <div className="muted" style={{ fontSize: 12 }}>
+		        	        Canal 1:1. <span style={{ opacity: 0.8 }}>✓✓</span> = entregado · <span style={{ color: "#36a3ff" }}>✓✓</span> = leído.
+		        	      </div>
 		              </div>
 		              <button className="btnSecondary" onClick={closeAdminThread}>Volver</button>
 		            </div>
@@ -2172,16 +2276,34 @@ async function submitSocioForm() {
 		              ) : (
 		                adminThreadMsgs.map((m) => {
 		                  const mine = (m.from_role === "admin");
+		                  const status = mine ? renderTicks({ delivered: true, read: !!m.read_by_member }) : null;
 		                  return (
 		                    <div key={m.id || m.created_at} className={`msgRow ${mine ? "msgMe" : "msgOther"}`}>
 		                      <div className="msgBubble">
 		                        <div style={{ whiteSpace: "pre-wrap" }}>{m.body}</div>
-		                        <div className="msgMeta">{formatDateTime(m.created_at)}</div>
+		                        <div className="msgMeta">
+		                          {formatDateTime(m.created_at)}
+		                          {mine ? status : null}
+		                        </div>
 		                      </div>
 		                    </div>
 		                  );
 		                })
 		              )}
+		            </div>
+
+		            <div className="row" style={{ gap: 8, marginTop: 12, flexWrap: "wrap" }}>
+		              <textarea
+		                className="input"
+		                placeholder="Responder como UIC…"
+		                value={adminReplyDraft}
+		                onChange={(e) => setAdminReplyDraft(e.target.value)}
+		                rows={3}
+		                style={{ minWidth: 260, flex: 1 }}
+		              />
+		              <button className="btnPrimary" type="button" onClick={adminSendReply} disabled={!String(adminReplyDraft || "").trim()}>
+		                Enviar
+		              </button>
 		            </div>
 		          </>
 		        ) : (
@@ -2278,6 +2400,9 @@ async function submitSocioForm() {
 		          <>
 		            <div className="muted" style={{ marginBottom: 8 }}>
 		              {memberCompany ? <b>{memberCompany}</b> : "Tu empresa"} — canal directo con UIC.
+		              <div style={{ marginTop: 4, fontSize: 12 }}>
+		                <span style={{ opacity: 0.8 }}>✓✓</span> = entregado · <span style={{ color: "#36a3ff" }}>✓✓</span> = leído
+		              </div>
 		            </div>
 		            {memberUsingDefault ? (
 		              <div className="alert" style={{ marginBottom: 10 }}>
@@ -2340,11 +2465,15 @@ async function submitSocioForm() {
 		              ) : (
 		                memberMsgs.map((m) => {
 		                  const mine = (m.from_role === "member");
+		                  const status = mine ? renderTicks({ delivered: true, read: !!m.read_by_admin }) : null;
 		                  return (
 		                    <div key={m.id || m.created_at} className={`msgRow ${mine ? "msgMe" : "msgOther"}`}>
 		                      <div className="msgBubble">
 		                        <div style={{ whiteSpace: "pre-wrap" }}>{m.body}</div>
-		                        <div className="msgMeta">{formatDateTime(m.created_at)}{mine ? (m.read_by_admin ? " · leído" : " · enviado") : ""}</div>
+		                        <div className="msgMeta">
+		                          {formatDateTime(m.created_at)}
+		                          {mine ? status : null}
+		                        </div>
 		                      </div>
 		                    </div>
 		                  );
