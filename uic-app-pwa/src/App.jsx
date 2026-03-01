@@ -3,7 +3,7 @@ import "./index.css";
 import logoUIC from "./assets/logo-uic.jpeg";
 
 // Versión visible (footer / ajustes)
-const APP_VERSION = "0.30.3";
+const APP_VERSION = "0.31.0";
 const BUILD_STAMP = (typeof __UIC_BUILD_STAMP__ !== "undefined") ? __UIC_BUILD_STAMP__ : "";
 const PWA_CACHE_ID = (typeof __UIC_CACHE_ID__ !== "undefined") ? __UIC_CACHE_ID__ : "";
 const PWA_COMMIT = (typeof __UIC_COMMIT__ !== "undefined") ? __UIC_COMMIT__ : "";
@@ -139,7 +139,7 @@ export default function App() {
     if (c === "todos" || c === "all") return "";
     return c;
   };
-  const [tab, setTab] = useState("inicio"); // inicio | publicaciones | beneficios | agenda | comunicacion | ajustes
+  const [tab, setTab] = useState("inicio"); // inicio | publicaciones | proindustrial | manual | beneficios | agenda | bolsa | comunicacion | mensajes | socios | ajustes
 
   // Zoom lock (evita zoom por pellizco y el auto-zoom al escribir en iOS).
   // Se guarda por dispositivo.
@@ -325,6 +325,51 @@ const [memberPwOpen, setMemberPwOpen] = useState(false);
 
   // UX: overlay al forzar actualización (en algunos celulares tarda y parece que "no hizo nada")
   const [refreshing, setRefreshing] = useState(false);
+
+// Acceso protegido: Requerimientos Institucionales (pide clave socio o admin)
+const REQ_INST_URL = "https://cpf-web.onrender.com/"; // link actual del sistema de requerimientos
+const [reqGateOpen, setReqGateOpen] = useState(false);
+const [reqGatePass, setReqGatePass] = useState("");
+const [reqGateErr, setReqGateErr] = useState("");
+const [reqGateBusy, setReqGateBusy] = useState(false);
+
+const openReqGate = () => {
+  setReqGatePass("");
+  setReqGateErr("");
+  setReqGateOpen(true);
+};
+
+const verifyReqGateAndOpen = async () => {
+  const pw = (reqGatePass || "").trim();
+  if (!pw) { setReqGateErr("Ingresá una clave."); return; }
+
+  // Si el admin está activo en este dispositivo, permitimos validar local (evita depender de red)
+  if (adminToken && pw === adminToken) {
+    try { window.open(REQ_INST_URL, "_blank", "noreferrer"); } catch (_) { window.location.href = REQ_INST_URL; }
+    setReqGateOpen(false);
+    return;
+  }
+
+  if (!API_BASE) { setReqGateErr("No hay conexión con la API para validar la clave."); return; }
+
+  setReqGateBusy(true);
+  setReqGateErr("");
+  try {
+    const r = await fetch(`${API_BASE}/access/verify`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ password: pw }),
+    });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok || !data?.ok) throw new Error(data?.error || "Clave incorrecta.");
+    try { window.open(REQ_INST_URL, "_blank", "noreferrer"); } catch (_) { window.location.href = REQ_INST_URL; }
+    setReqGateOpen(false);
+  } catch (e) {
+    setReqGateErr(String(e?.message || e));
+  } finally {
+    setReqGateBusy(false);
+  }
+};
 
   // Planilla de socios (admin)
   const [planillaOpen, setPlanillaOpen] = useState(false);
@@ -1071,6 +1116,10 @@ useEffect(() => {
     if (tab === "publicaciones") {
       loadPosts({ perPage: 6, page: 1, append: false, category: categoryParam, q: searchQuery });
     }
+
+    if (tab === "proindustrial") {
+      loadPosts({ perPage: 6, page: 1, append: false, category: "promocion-industrial", q: "" });
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab, categorySlug, searchQuery]);
 
@@ -1095,17 +1144,25 @@ useEffect(() => {
   }, [tab, sociosCategory, sociosSearchQuery]);
 
 
-  const quickLinks = [
-    { key: "hacete_socio", label: "Hacete socio", href: "https://uic-campana.com.ar/hacete-socio/" },
-    { key: "promocion_industrial", label: "Promoción Industrial", href: "https://uic-campana.com.ar/category/promocion-industrial/" },
-    { key: "beneficios", label: "Beneficios", href: "#", onClick: () => setTab("beneficios") },
-    { key: "agenda", label: "Agenda", href: "#", onClick: () => setTab("agenda") },
-    { key: "comunicacion_socio", label: "Comunicación al socio", href: "#", onClick: () => { setTab("comunicacion"); } },
-    { key: "socios", label: "Socios", href: "#", onClick: () => { setTab("socios"); } },
-    { key: "req_institucionales", label: "Requerimientos Institucionales", href: "https://cpf-web.onrender.com/" },
-    { key: "mensajes_admin", label: "comunicación al administrador", href: "#", onClick: () => { setTab("mensajes"); }, badge: (msgsUnseen || 0) },
-    { key: "sitio_uic", label: "Sitio UIC", href: "https://uic-campana.com.ar" },
-  ];
+const quickLinks = [
+  { key: "hacete_socio", label: "Hacete socio", href: "https://uic-campana.com.ar/hacete-socio/" },
+
+  // v0.31: “Promoción Industrial” (arriba) pasa a ser “Bolsa de trabajo”
+  { key: "bolsa_trabajo", label: "Bolsa de trabajo", href: "#", onClick: () => setTab("bolsa") },
+
+  { key: "beneficios", label: "Beneficios", href: "#", onClick: () => setTab("beneficios") },
+  { key: "agenda", label: "Agenda", href: "#", onClick: () => setTab("agenda") },
+
+  { key: "comunicacion_socio", label: "Comunicación al socio", href: "#", onClick: () => { setTab("comunicacion"); } },
+  { key: "socios", label: "Socios", href: "#", onClick: () => { setTab("socios"); } },
+
+  // Protegido por clave (socio o admin)
+  { key: "req_institucionales", label: "Requerimientos inst.", href: "#", onClick: () => openReqGate() },
+
+  { key: "mensajes_admin", label: "Comunicación al administrador", href: "#", onClick: () => { setTab("mensajes"); }, badge: (msgsUnseen || 0) },
+  { key: "sitio_uic", label: "Sitio UIC", href: "https://uic-campana.com.ar/" },
+];
+
 
   // ---------------- Agenda helpers ----------------
 
@@ -1966,12 +2023,14 @@ async function submitSocioForm() {
           </>
         )}
 
-        {tab === "publicaciones" && (
+        {(tab === "publicaciones" || tab === "proindustrial") && (
           <section className="card">
             <div className="rowBetween">
-              <div className="cardTitle">Publicaciones</div>
+              <div className="cardTitle">{tab === "proindustrial" ? "Pro.Industrial" : "Publicaciones"}</div>
             </div>
 
+            {tab !== "proindustrial" && (
+            <>
             <div className="searchRow">
               <input
                 className="input"
@@ -2019,6 +2078,8 @@ async function submitSocioForm() {
                 Eventos
               </button>
             </div>
+            </>
+            )}
 
             {loadingPosts ? (
               <div className="muted">Cargando…</div>
@@ -2028,7 +2089,7 @@ async function submitSocioForm() {
                 <button
                   className="btnSecondary"
                   disabled={postsPager.page <= 1}
-                  onClick={() => loadPosts({ perPage: postsPager.per_page, page: Math.max(1, postsPager.page - 1) })}
+                  onClick={() => loadPosts({ perPage: postsPager.per_page, page: Math.max(1, postsPager.page - 1), category: (tab === "proindustrial" ? "promocion-industrial" : categoryParam), q: (tab === "proindustrial" ? "" : searchQuery) })}
                 >
                   ◀
                 </button>
@@ -2038,7 +2099,7 @@ async function submitSocioForm() {
                 <button
                   className="btnSecondary"
                   disabled={!postsPager.has_more}
-                  onClick={() => loadPosts({ perPage: postsPager.per_page, page: postsPager.page + 1 })}
+                  onClick={() => loadPosts({ perPage: postsPager.per_page, page: postsPager.page + 1, category: (tab === "proindustrial" ? "promocion-industrial" : categoryParam), q: (tab === "proindustrial" ? "" : searchQuery) })}
                 >
                   ▶
                 </button>
@@ -2058,7 +2119,75 @@ async function submitSocioForm() {
           </section>
         )}
 
-        {tab === "beneficios" && (
+        {tab === "bolsa" && (
+  <section className="card">
+    <div className="cardTitle">Bolsa de Trabajo</div>
+    <div className="muted" style={{ marginTop: 6 }}>
+      Módulo en desarrollo. En esta etapa dejamos el acceso creado y el lugar reservado.
+    </div>
+    <div className="alert" style={{ marginTop: 10 }}>
+      Próximo paso: categorías laborales + carga de perfiles + filtros (según tu definición).
+    </div>
+  </section>
+)}
+
+{tab === "manual" && (
+  <section className="card">
+    <div className="cardTitle">Manual</div>
+    <div className="manualBody">
+<h3>Objetivo</h3>
+<div className="muted">
+  Esta app PWA centraliza publicaciones, agenda, beneficios y comunicación socio ↔ administrador.
+  Además incorpora accesos protegidos para evitar que un no-socio navegue áreas sensibles.
+</div>
+
+<h3>Navegación inferior</h3>
+<ul>
+  <li><b>Inicio</b>: accesos rápidos + últimas publicaciones.</li>
+  <li><b>Publicaciones</b>: listado completo con búsqueda y filtros.</li>
+  <li><b>Pro.Industrial</b>: publicaciones de la categoría “Promoción Industrial”.</li>
+  <li><b>Manual</b>: esta ayuda.</li>
+  <li><b>Ajustes</b>: versión, clave admin, login socio, y utilidades (incluye “Bloquear zoom”).</li>
+</ul>
+
+<h3>Inicio (accesos rápidos)</h3>
+<ul>
+  <li><b>Bolsa de trabajo</b>: acceso al módulo (en desarrollo).</li>
+  <li><b>Beneficios</b>: beneficios para socios y comunidad (desde Inicio).</li>
+  <li><b>Agenda</b>: eventos y actividades (desde Inicio).</li>
+  <li><b>Requerimientos inst.</b>: acceso protegido por clave (sirve clave de socio o clave admin).</li>
+</ul>
+
+<h3>Portal del Socio</h3>
+<ul>
+  <li>Ingreso por <b>número de socio</b> + <b>clave</b>.</li>
+  <li>Clave por defecto: se genera con el nombre de la empresa (normalizada).</li>
+  <li>La app permite <b>cambiar clave</b> desde la sección del socio (si está habilitado en tu versión instalada).</li>
+</ul>
+
+<h3>Comunicación (mensajería)</h3>
+<ul>
+  <li><b>Socio → Administrador</b>: consultas y pedidos.</li>
+  <li><b>Administrador → Socio</b>: respuestas y seguimiento.</li>
+  <li>Tildes estilo WhatsApp: <b>✓</b> enviado, <b>✓</b> entregado, <b>✓✓</b> leído (celeste).</li>
+</ul>
+
+<h3>Accesos protegidos</h3>
+<div className="muted">
+  Si alguien que no es socio intenta abrir “Requerimientos inst.”, deberá ingresar una clave válida.
+  Esto evita que visitantes de “Bolsa de trabajo” exploren botones delicados.
+</div>
+
+<h3>Bloquear zoom</h3>
+<div className="muted">
+  En Ajustes podés activar/desactivar el bloqueo de zoom para evitar que la pantalla se agrande al tipear
+  o al hacer gesto con los dedos.
+</div>
+            </div>
+  </section>
+)}
+
+{tab === "beneficios" && (
           <section className="card">
             <div className="cardTitle">Beneficios</div>
             <div className="muted">
@@ -3254,23 +3383,53 @@ async function submitSocioForm() {
 
       <div className="appFooter">{APP_VERSION}</div>
 
-      <nav className="bottomNav">
-        <button className={cls("navBtn", tab === "inicio" && "navActive")} onClick={() => setTab("inicio")}>
-          Inicio
+      {reqGateOpen ? (
+  <div className="modalOverlay" onClick={() => setReqGateOpen(false)}>
+    <div className="modal" onClick={(e) => e.stopPropagation()}>
+      <div className="modalTitle">Acceso a Requerimientos Institucionales</div>
+      <div className="modalSub">Ingresá una clave de socio o la clave de administrador.</div>
+
+      <label className="formLabel">
+        Clave
+        <input
+          className="input"
+          type="password"
+          value={reqGatePass}
+          onChange={(e) => setReqGatePass(e.target.value)}
+          placeholder="Ingresá la clave…"
+          autoFocus
+        />
+      </label>
+
+      {reqGateErr ? <div className="muted" style={{ marginTop: 8 }}>⚠ {reqGateErr}</div> : null}
+
+      <div className="rowEnd" style={{ marginTop: 12 }}>
+        <button className="btnGhost" onClick={() => setReqGateOpen(false)} disabled={reqGateBusy}>Cancelar</button>
+        <button className="btnPrimary" onClick={verifyReqGateAndOpen} disabled={reqGateBusy}>
+          {reqGateBusy ? "Verificando…" : "Ingresar"}
         </button>
-        <button className={cls("navBtn", tab === "publicaciones" && "navActive")} onClick={() => setTab("publicaciones")}>
-          Publicaciones
-        </button>
-        <button className={cls("navBtn", tab === "beneficios" && "navActive")} onClick={() => setTab("beneficios")}>
-          Beneficios
-        </button>
-        <button className={cls("navBtn", tab === "agenda" && "navActive")} onClick={() => setTab("agenda")}>
-          Agenda {todayEventsCount > 0 && <span className="navBadgeNum">{todayEventsCount}</span>}
-        </button>
-        <button className={cls("navBtn", tab === "ajustes" && "navActive")} onClick={() => setTab("ajustes")}>
-          Ajustes
-        </button>
-      </nav>
+      </div>
+    </div>
+  </div>
+) : null}
+
+<nav className="bottomNav">
+  <button className={cls("navBtn", tab === "inicio" && "navActive")} onClick={() => setTab("inicio")}>
+    Inicio
+  </button>
+  <button className={cls("navBtn", tab === "publicaciones" && "navActive")} onClick={() => setTab("publicaciones")}>
+    Publicaciones
+  </button>
+  <button className={cls("navBtn", tab === "proindustrial" && "navActive")} onClick={() => setTab("proindustrial")}>
+    Pro.Industrial
+  </button>
+  <button className={cls("navBtn", tab === "manual" && "navActive")} onClick={() => setTab("manual")}>
+    Manual
+  </button>
+  <button className={cls("navBtn", tab === "ajustes" && "navActive")} onClick={() => setTab("ajustes")}>
+    Ajustes
+  </button>
+</nav>
     </div>
   );
 }

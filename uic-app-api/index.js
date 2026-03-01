@@ -879,6 +879,74 @@ app.get("/admin/ping", requireAdmin, (req, res) => {
   return res.json({ ok: true, apiVersion: API_VERSION, build: API_BUILD_STAMP });
 });
 
+/**
+ * Verificación de clave genérica para habilitar accesos “sensibles” desde la PWA
+ * (ej: botón “Requerimientos Institucionales”).
+ *
+ * Regla: sirve la clave ADMIN o la clave de cualquier socio (default o cambiada).
+ *
+ * Nota: esto NO devuelve identidad; solo ok / no ok.
+ */
+app.post("/access/verify", async (req, res) => {
+  try {
+    if (__rateLimited(req, res, "access-verify", 12, 10 * 60 * 1000)) return;
+
+    const raw = String(req.body?.password || "").trim();
+    if (!raw) return res.status(400).json({ ok: false, error: "Falta password." });
+
+    const pw = toAsciiLower(raw);
+
+    // 1) Admin (clave de administrador = ADMIN_TOKEN)
+    if (toAsciiLower(String(ADMIN_TOKEN || "")) === pw) {
+      return res.json({ ok: true, role: "admin" });
+    }
+
+    // 2) Socio: primero chequeo “default” (barato)
+    let socios = [];
+    if (dbReady) {
+      const r = await pool.query('SELECT member_no AS "memberNo", company_name AS "companyName" FROM uic_socios');
+      socios = r.rows || [];
+    } else {
+      socios = (SOCIOS_STORE?.items || []).map((s) => ({
+        memberNo: s.memberNo ?? s.member_no ?? s.member ?? s.id ?? s.numero_socio,
+        companyName: s.companyName ?? s.company_name ?? s.empresa ?? "",
+      }));
+    }
+
+    for (const s of socios) {
+      const def = defaultMemberPassword(String(s.companyName || ""));
+      if (def && def === pw) return res.json({ ok: true, role: "member_default" });
+    }
+
+    // 3) Socio: chequeo “cambiada” (solo donde existan credenciales)
+    let creds = [];
+    if (dbReady) {
+      const r = await pool.query('SELECT member_no AS "memberNo", password_hash AS "passwordHash" FROM uic_member_credentials');
+      creds = r.rows || [];
+    } else {
+      creds = Object.entries(MEMBER_CREDS_STORE || {}).map(([memberNo, v]) => ({
+        memberNo,
+        passwordHash: v?.password_hash || v?.passwordHash,
+      }));
+    }
+
+    // Evita loops enormes
+    let checked = 0;
+    for (const c of creds) {
+      if (!c?.passwordHash) continue;
+      checked += 1;
+      if (checked > 2000) break;
+      if (scryptVerify(pw, c.passwordHash)) return res.json({ ok: true, role: "member" });
+    }
+
+    return res.status(401).json({ ok: false, error: "Clave incorrecta." });
+  } catch (e) {
+    console.error("access/verify error:", e);
+    return res.status(500).json({ ok: false, error: "Error validando la clave." });
+  }
+});
+
+
 /* ----------------------------- Push config ------------------------------ */
 
 let PUSH_ENABLED = false;

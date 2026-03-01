@@ -690,3 +690,10 @@ a{color:inherit}
   box-shadow:0 14px 40px rgba(0,0,0,0.5);
   max-width:560px;
 }
+
+
+/* Manual (v0.31) */
+.manualBody{ font-size: 14px; line-height: 1.45; }
+.manualBody h3{ margin: 12px 0 6px; font-size: 15px; }
+.manualBody ul{ margin: 6px 0 10px; padding-left: 18px; }
+.manualBody li{ margin: 4px 0; }
