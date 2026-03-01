@@ -3,7 +3,7 @@ import "./index.css";
 import logoUIC from "./assets/logo-uic.jpeg";
 
 // Versión visible (footer / ajustes)
-const APP_VERSION = "0.34.0";
+const APP_VERSION = "0.34.1";
 const BUILD_STAMP = (typeof __UIC_BUILD_STAMP__ !== "undefined") ? __UIC_BUILD_STAMP__ : "";
 const PWA_CACHE_ID = (typeof __UIC_CACHE_ID__ !== "undefined") ? __UIC_CACHE_ID__ : "";
 const PWA_COMMIT = (typeof __UIC_COMMIT__ !== "undefined") ? __UIC_COMMIT__ : "";
@@ -3133,51 +3133,51 @@ async function submitSocioForm() {
     <div className="manualBody">
 <h3>Objetivo</h3>
 <div className="muted">
-  Esta app PWA centraliza publicaciones, agenda, beneficios y comunicación socio ↔ administrador.
-  Además incorpora accesos protegidos para evitar que un no-socio navegue áreas sensibles.
+  La App UIC Campana (PWA) centraliza publicaciones institucionales, beneficios, comunicación socio ↔ administrador
+  y el módulo “Bolsa de Trabajo” para registrar perfiles laborales con mínima escritura.
+</div>
+
+<h3>Instalación (iPhone / Android)</h3>
+<div className="muted">
+  Abrí el enlace oficial en tu navegador y luego agregá la app a tu pantalla de inicio:
+  <div style={{ marginTop: 6 }}><b>Enlace oficial:</b> https://uic-campana-app.onrender.com</div>
+  <div style={{ marginTop: 6 }}>
+    La guía completa está en <b>Ajustes → Descargar manual (PDF)</b>.
+  </div>
 </div>
 
 <h3>Navegación inferior</h3>
 <ul>
-  <li><b>Inicio</b>: accesos rápidos + últimas publicaciones.</li>
-  <li><b>Publicaciones</b>: listado completo con búsqueda y filtros.</li>
-  <li><b>Pro.Industrial</b>: publicaciones de la categoría “Promoción Industrial”.</li>
-  <li><b>Manual</b>: esta ayuda.</li>
-  <li><b>Ajustes</b>: versión, clave admin, login socio, y utilidades (incluye “Bloquear zoom”).</li>
+  <li><b>Inicio</b>: accesos rápidos y destacados.</li>
+  <li><b>Publicaciones</b>: listado con búsqueda y filtros.</li>
+  <li><b>Pro.Industrial</b>: acceso rápido a Promoción Industrial.</li>
+  <li><b>Manual</b>: ayuda rápida (esta pantalla).</li>
+  <li><b>Ajustes</b>: versión, forzar actualización, zoom, y herramientas.</li>
 </ul>
 
-<h3>Inicio (accesos rápidos)</h3>
+<h3>Bolsa de Trabajo</h3>
 <ul>
-  <li><b>Bolsa de trabajo</b>: acceso al módulo (en desarrollo).</li>
-  <li><b>Beneficios</b>: beneficios para socios y comunidad (desde Inicio).</li>
-  <li><b>Agenda</b>: eventos y actividades (desde Inicio).</li>
-  <li><b>Requerimientos institucionales</b>: acceso protegido por clave (sirve clave de socio o clave admin).</li>
+  <li><b>Alta de candidato</b>: formulario por secciones con listas desplegables (se escribe lo mínimo).</li>
+  <li>Los campos obligatorios llevan <b>*</b>. Si falta algo, la app lo marca y no deja finalizar.</li>
+  <li>Para <b>Mecánica</b> y <b>Eléctrica</b> podés tildar equipos/herramientas relevantes (expertise).</li>
+  <li>Si la especialidad es <b>Soldador</b>, se solicita <b>Categoría</b> (1/2/3 u otras opciones).</li>
 </ul>
 
-<h3>Portal del Socio</h3>
-<ul>
-  <li>Ingreso por <b>número de socio</b> + <b>clave</b>.</li>
-  <li>Clave por defecto: se genera con el nombre de la empresa (normalizada).</li>
-  <li>La app permite <b>cambiar clave</b> desde la sección del socio (si está habilitado en tu versión instalada).</li>
-</ul>
+<h3>Buscar CV (tablero + filtros + ficha)</h3>
+<div className="muted">
+  La consulta de la base (tablero de totales, buscador con filtros y ficha del candidato) está protegida.
+  Requiere clave válida de socio o clave de administrador. El administrador además puede exportar Excel (.xlsx).
+</div>
 
 <h3>Comunicación (mensajería)</h3>
 <ul>
-  <li><b>Socio → Administrador</b>: consultas y pedidos.</li>
-  <li><b>Administrador → Socio</b>: respuestas y seguimiento.</li>
-  <li>Tildes estilo WhatsApp: <b>✓</b> enviado, <b>✓</b> entregado, <b>✓✓</b> leído (celeste).</li>
+  <li><b>Socio → Administrador</b> y <b>Administrador → Socio</b> con historial.</li>
+  <li>Tildes estilo WhatsApp: <b>✓✓</b> gris = entregado, <b>✓✓</b> celeste = leído.</li>
 </ul>
 
-<h3>Accesos protegidos</h3>
+<h3>Zoom</h3>
 <div className="muted">
-  Si alguien que no es socio intenta abrir “Requerimientos institucionales”, deberá ingresar una clave válida.
-  Esto evita que visitantes de “Bolsa de trabajo” exploren botones delicados.
-</div>
-
-<h3>Bloquear zoom</h3>
-<div className="muted">
-  En Ajustes podés activar/desactivar el bloqueo de zoom para evitar que la pantalla se agrande al tipear
-  o al hacer gesto con los dedos.
+  El zoom inicia <b>bloqueado por defecto</b>. En Ajustes podés desbloquearlo si lo necesitás.
 </div>
             </div>
   </section>
