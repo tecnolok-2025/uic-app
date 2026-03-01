@@ -3,7 +3,7 @@ import "./index.css";
 import logoUIC from "./assets/logo-uic.jpeg";
 
 // Versión visible (footer / ajustes)
-const APP_VERSION = "0.34.1";
+const APP_VERSION = "0.34.2";
 const BUILD_STAMP = (typeof __UIC_BUILD_STAMP__ !== "undefined") ? __UIC_BUILD_STAMP__ : "";
 const PWA_CACHE_ID = (typeof __UIC_CACHE_ID__ !== "undefined") ? __UIC_CACHE_ID__ : "";
 const PWA_COMMIT = (typeof __UIC_COMMIT__ !== "undefined") ? __UIC_COMMIT__ : "";
@@ -662,36 +662,43 @@ const exportJobsXlsx = async (filtered = false) => {
   if (!API_BASE) return;
   if (!adminToken) { setJobsErr("Solo el administrador puede descargar la base completa."); return; }
   try {
-    const url = new URL(`${API_BASE}/jobs/export`);
+    const exportUrl = new URL(`${API_BASE}/jobs/export`);
     if (filtered) {
-      if ((jobsQ || "").trim()) url.searchParams.set("q", (jobsQ || "").trim());
-      if (jobsArea) url.searchParams.set("area", jobsArea);
-      if (jobsLoc) url.searchParams.set("localidad", jobsLoc);
-      if (jobsNivel) url.searchParams.set("nivel", jobsNivel);
-      if (jobsEsp) url.searchParams.set("especialidad", jobsEsp);
-      if (jobsExp) url.searchParams.set("rango_experiencia", jobsExp);
-      if (jobsEdu) url.searchParams.set("nivel_educativo", jobsEdu);
-      if (jobsCap) url.searchParams.set("tiene_capacitacion", jobsCap);
-      if (jobsTrab) url.searchParams.set("trabaja_actualmente", jobsTrab);
-      if (jobsSoldCat) url.searchParams.set("soldador_categoria", jobsSoldCat);
-      if (jobsHerr) url.searchParams.set("herramienta", jobsHerr);
-      if (jobsInstr) url.searchParams.set("instrumento", jobsInstr);
+      if ((jobsQ || "").trim()) exportUrl.searchParams.set("q", (jobsQ || "").trim());
+      if (jobsArea) exportUrl.searchParams.set("area", jobsArea);
+      if (jobsLoc) exportUrl.searchParams.set("localidad", jobsLoc);
+      if (jobsNivel) exportUrl.searchParams.set("nivel", jobsNivel);
+      if (jobsEsp) exportUrl.searchParams.set("especialidad", jobsEsp);
+      if (jobsExp) exportUrl.searchParams.set("rango_experiencia", jobsExp);
+      if (jobsEdu) exportUrl.searchParams.set("nivel_educativo", jobsEdu);
+      if (jobsCap) exportUrl.searchParams.set("tiene_capacitacion", jobsCap);
+      if (jobsTrab) exportUrl.searchParams.set("trabaja_actualmente", jobsTrab);
+      if (jobsSoldCat) exportUrl.searchParams.set("soldador_categoria", jobsSoldCat);
+      if (jobsHerr) exportUrl.searchParams.set("herramienta", jobsHerr);
+      if (jobsInstr) exportUrl.searchParams.set("instrumento", jobsInstr);
     }
 
-    const r = await fetch(url.toString(), { headers: { "x-admin-token": adminToken } });
+    const r = await fetch(exportUrl.toString(), { headers: { "x-admin-token": adminToken } });
     if (!r.ok) {
-      const j = await r.json().catch(() => ({}));
-      throw new Error(j?.error || "No se pudo exportar");
+      // A veces el backend puede devolver HTML/Texto (proxy / error de Render). Intentamos leerlo sin romper.
+      const ct = (r.headers.get("content-type") || "").toLowerCase();
+      if (ct.includes("application/json")) {
+        const j = await r.json().catch(() => ({}));
+        throw new Error(j?.error || `No se pudo exportar (HTTP ${r.status})`);
+      } else {
+        const t = await r.text().catch(() => "");
+        throw new Error(t?.slice(0, 120) || `No se pudo exportar (HTTP ${r.status})`);
+      }
     }
     const blob = await r.blob();
     const a = document.createElement("a");
-    const url = URL.createObjectURL(blob);
-    a.href = url;
+    const downloadUrl = URL.createObjectURL(blob);
+    a.href = downloadUrl;
     a.download = `uic_bolsa_trabajo_${filtered ? "filtrado_" : ""}${new Date().toISOString().slice(0,10)}.xlsx`;
     document.body.appendChild(a);
     a.click();
     a.remove();
-    URL.revokeObjectURL(url);
+    URL.revokeObjectURL(downloadUrl);
   } catch (e) {
     setJobsErr(String(e?.message || e));
   }
