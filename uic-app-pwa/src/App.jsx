@@ -3,7 +3,7 @@ import "./index.css";
 import logoUIC from "./assets/logo-uic.jpeg";
 
 // Versión visible (footer / ajustes)
-const APP_VERSION = "0.30.0";
+const APP_VERSION = "0.30.2";
 const BUILD_STAMP = (typeof __UIC_BUILD_STAMP__ !== "undefined") ? __UIC_BUILD_STAMP__ : "";
 const PWA_CACHE_ID = (typeof __UIC_CACHE_ID__ !== "undefined") ? __UIC_CACHE_ID__ : "";
 const PWA_COMMIT = (typeof __UIC_COMMIT__ !== "undefined") ? __UIC_COMMIT__ : "";
@@ -185,6 +185,23 @@ export default function App() {
   }, [adminToken]);
 
   const isAdmin = Boolean(adminToken);
+  // Valida el token admin contra el servidor. Si es viejo/incorrecto, lo limpiamos (evita inconsistencias).
+  useEffect(() => {
+    (async () => {
+      if (!adminToken) return;
+      try {
+        const r = await fetch(`${API_BASE}/admin/ping`, { headers: { "x-admin-token": adminToken } });
+        if (!r.ok) {
+          sessionStorage.removeItem("uic_admin_token");
+          setAdminToken("");
+          setAdminDraft("");
+        }
+      } catch (_) {
+        // si no hay red, no tocamos el token
+      }
+    })();
+  }, [adminToken]);
+
 
   // Comunicación al socio
   const [comms, setComms] = useState([]);
@@ -1432,7 +1449,12 @@ async function createEvent(payload) {
     });
     if (!r.ok) {
       const j = await r.json().catch(() => ({}));
-      throw new Error(j?.error || `Error ${r.status}`);
+      if (r.status === 401 || r.status === 403) {
+        try { sessionStorage.removeItem("uic_admin_token"); } catch (_) {}
+        setAdminToken("");
+        setAdminDraft("");
+      }
+      throw new Error(j?.error || `Error `);
     }
     const j = await r.json();
     setCommsMeta((m) => ({ ...m, updatedAt: j.updatedAt || m.updatedAt }));
@@ -1492,6 +1514,12 @@ if (!token) {
         setMemberLoginErr("Respuesta inválida del servidor (sin token).");
         return;
       }
+      // Al iniciar sesión como socio, apagamos modo admin (evita mezclar roles por cache/sessionStorage en iPhone).
+      try { sessionStorage.removeItem("uic_admin_token"); } catch (_) {}
+      setAdminToken("");
+      setAdminDraft("");
+      setMsgsMode("socio");
+
       sessionStorage.setItem(MEMBER_TOKEN_KEY, token);
       sessionStorage.setItem(MEMBER_NO_KEY, no);
       sessionStorage.setItem(MEMBER_COMPANY_KEY, companyName);
@@ -2177,6 +2205,17 @@ async function submitSocioForm() {
             </div>
 
             {isAdmin && commsComposeOpen && <CommCreateForm onPublish={publishComm} />}
+            {!isAdmin && memberToken ? (
+              <div style={{ marginTop: 10, padding: 10, borderRadius: 12, background: "rgba(255,255,255,.06)" }}>
+                <div className="muted" style={{ fontSize: 13 }}>
+                  Para mensajes directos socio ↔ UIC (con tildes y confirmación de lectura), usá <b>Comunicación al administrador</b>.
+                </div>
+                <div style={{ marginTop: 8 }}>
+                  <button className="btnSecondary" onClick={() => setTab("mensajes")}>Ir a Comunicación al administrador</button>
+                </div>
+              </div>
+            ) : null}
+
 
             <div style={{ marginTop: 12 }}>
               {(comms || []).length === 0 ? (
@@ -2966,23 +3005,8 @@ async function submitSocioForm() {
           <section className="card">
             <div className="cardTitle">Ajustes</div>
             <div className="muted">
-              <div>Versión: {APP_VERSION}</div>
-              <div>Build: {BUILD_STAMP || "(sin build stamp)"}</div>
-              <div>CacheId: {PWA_CACHE_ID || "(s/d)"}</div>
-              <div>URL: {window.location.origin}</div>
-              <div>API: {API_BASE || "(sin configurar)"}</div>
-              <div>Estado API: {apiStatus?.ok ? "OK" : "NO OK"}</div>
-              <div>API versión: {apiStatus?.apiVersion || "(s/d)"}</div>
-              <div>API build: {apiStatus?.build || "(s/d)"}</div>
-              <div style={{ marginTop: 10 }}>
-                <b>iPhone (PWA):</b> para “instalar” la app, abrí en Safari → Compartir → <i>Agregar a inicio</i>.
-              </div>
-              <div style={{ marginTop: 12 }}>
-                <button className="btnPrimary" onClick={async () => { setRefreshing(true); try { await hardRefreshWithBadge(); } finally { setTimeout(() => setRefreshing(false), 8000); } }}>Forzar actualización</button>
-                <div className="muted" style={{ marginTop: 6, fontSize: 12 }}>
-                  Si el celular no toma cambios, este botón intenta borrar cache y service worker y recargar.
-                </div>
-              </div>
+              <div>Versión: {APP_VERSION}</div><div style={{ marginTop: 12 }}>
+                <button className="btnPrimary" onClick={async () => { setRefreshing(true); try { await hardRefreshWithBadge(); } finally { setTimeout(() => setRefreshing(false), 8000); } }}>Forzar actualización</button></div>
 
               <div style={{ marginTop: 18 }}>
                 <div style={{ fontWeight: 700, marginBottom: 6 }}>Administrador – Adecuación de datos del socio</div>

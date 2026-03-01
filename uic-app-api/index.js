@@ -667,6 +667,11 @@ function requireAdmin(req, res, next) {
   next();
 }
 
+// Admin ping: valida token y devuelve versión/build (para evitar "admin pegado" con token viejo).
+app.get("/admin/ping", requireAdmin, (req, res) => {
+  return res.json({ ok: true, apiVersion: API_VERSION, build: API_BUILD_STAMP });
+});
+
 
 
 // --------------------- Member (Socio) auth helpers ----------------------
