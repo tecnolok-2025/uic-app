@@ -3,7 +3,7 @@ import "./index.css";
 import logoUIC from "./assets/logo-uic.jpeg";
 
 // Versión visible (footer / ajustes)
-const APP_VERSION = "0.34.2";
+const APP_VERSION = "0.34.3";
 const BUILD_STAMP = (typeof __UIC_BUILD_STAMP__ !== "undefined") ? __UIC_BUILD_STAMP__ : "";
 const PWA_CACHE_ID = (typeof __UIC_CACHE_ID__ !== "undefined") ? __UIC_CACHE_ID__ : "";
 const PWA_COMMIT = (typeof __UIC_COMMIT__ !== "undefined") ? __UIC_COMMIT__ : "";
@@ -118,8 +118,8 @@ async function hardRefreshWithBadge(onStart) {
   } finally {
     // Cache-buster robusto (evita quedarse "pegado" en Actualizando...)
     const url = new URL(window.location.href);
-    url.searchParams.set("v", String(PWA_CACHE_ID || Date.now()));
-    url.searchParams.set("t", String(Date.now()));
+    exportUrl.searchParams.set("v", String(PWA_CACHE_ID || Date.now()));
+    exportUrl.searchParams.set("t", String(Date.now()));
     window.location.replace(url.toString());
   }
 }
@@ -451,6 +451,44 @@ const AREA_TRABAJO = [
   "IT / Software",
 ];
 
+const SOLDADOR_CATEGORIAS = [
+  "1 (Certificado)",
+  "2 (Certificado)",
+  "3 (Certificado)",
+];
+
+const HERRAMIENTAS_MECANICA = [
+  "Torno paralelo / torno a tornillo",
+  "Torno CNC",
+  "Fresadora universal",
+  "Fresadora CNC / Centro de mecanizado",
+  "Alesadora",
+  "Rectificadora (plana/cilíndrica)",
+  "Cortadora de cinta / sinfín",
+  "Sierra circular industrial",
+  "Tronzadora / sensitiva",
+  "Prensa hidráulica",
+  "Plegadora",
+  "Guillotina",
+  "Mandrinadora / roscadora",
+  "Taladro de banco / radial",
+  "Balanceadora",
+  "Alineador láser (ejes)",
+];
+
+const INSTRUMENTOS_ELECTRICA = [
+  "Megóhmetro / Megger (aislación)",
+  "Telurímetro (puesta a tierra)",
+  "Pinza amperométrica TRMS industrial",
+  "Analizador de redes / calidad de energía (armónicos)",
+  "Osciloscopio (formas de onda)",
+  "Detector de tensión (alta/baja)",
+  "Cámara termográfica",
+  "Medidor de secuencia de fases",
+];
+
+
+
 const NIVEL_ELECTRO_MEC = ["Ayudante / Auxiliar", "Medio oficial", "Oficial", "Oficial especializado / Senior", "Técnico", "Supervisor"];
 const RANGO_EXP = ["0–1", "2–5", "6–10", "11–20", "21–30", "31+"];
 const NIVEL_EDU = ["Primaria", "Secundaria", "Terciaria", "Universitaria", "Otros"];
@@ -634,18 +672,18 @@ const searchJobs = async () => {
   setJobsErr("");
   try {
     const url = new URL(`${API_BASE}/jobs/search`);
-    if ((jobsQ || "").trim()) url.searchParams.set("q", (jobsQ || "").trim());
-    if (jobsArea) url.searchParams.set("area", jobsArea);
-    if (jobsLoc) url.searchParams.set("localidad", jobsLoc);
-    if (jobsNivel) url.searchParams.set("nivel", jobsNivel);
-    if (jobsEsp) url.searchParams.set("especialidad", jobsEsp);
-    if (jobsExp) url.searchParams.set("rango_experiencia", jobsExp);
-    if (jobsEdu) url.searchParams.set("nivel_educativo", jobsEdu);
-    if (jobsCap) url.searchParams.set("tiene_capacitacion", jobsCap);
-    if (jobsTrab) url.searchParams.set("trabaja_actualmente", jobsTrab);
-    if (jobsSoldCat) url.searchParams.set("soldador_categoria", jobsSoldCat);
-    if (jobsHerr) url.searchParams.set("herramienta", jobsHerr);
-    if (jobsInstr) url.searchParams.set("instrumento", jobsInstr);
+    if ((jobsQ || "").trim()) exportUrl.searchParams.set("q", (jobsQ || "").trim());
+    if (jobsArea) exportUrl.searchParams.set("area", jobsArea);
+    if (jobsLoc) exportUrl.searchParams.set("localidad", jobsLoc);
+    if (jobsNivel) exportUrl.searchParams.set("nivel", jobsNivel);
+    if (jobsEsp) exportUrl.searchParams.set("especialidad", jobsEsp);
+    if (jobsExp) exportUrl.searchParams.set("rango_experiencia", jobsExp);
+    if (jobsEdu) exportUrl.searchParams.set("nivel_educativo", jobsEdu);
+    if (jobsCap) exportUrl.searchParams.set("tiene_capacitacion", jobsCap);
+    if (jobsTrab) exportUrl.searchParams.set("trabaja_actualmente", jobsTrab);
+    if (jobsSoldCat) exportUrl.searchParams.set("soldador_categoria", jobsSoldCat);
+    if (jobsHerr) exportUrl.searchParams.set("herramienta", jobsHerr);
+    if (jobsInstr) exportUrl.searchParams.set("instrumento", jobsInstr);
     const r = await fetch(url.toString(), { headers: jobsAuthHeaders() });
     const j = await r.json().catch(() => ({}));
     if (!r.ok) throw new Error(j?.error || "Error al buscar");
@@ -680,15 +718,8 @@ const exportJobsXlsx = async (filtered = false) => {
 
     const r = await fetch(exportUrl.toString(), { headers: { "x-admin-token": adminToken } });
     if (!r.ok) {
-      // A veces el backend puede devolver HTML/Texto (proxy / error de Render). Intentamos leerlo sin romper.
-      const ct = (r.headers.get("content-type") || "").toLowerCase();
-      if (ct.includes("application/json")) {
-        const j = await r.json().catch(() => ({}));
-        throw new Error(j?.error || `No se pudo exportar (HTTP ${r.status})`);
-      } else {
-        const t = await r.text().catch(() => "");
-        throw new Error(t?.slice(0, 120) || `No se pudo exportar (HTTP ${r.status})`);
-      }
+      const j = await r.json().catch(() => ({}));
+      throw new Error(j?.error || "No se pudo exportar");
     }
     const blob = await r.blob();
     const a = document.createElement("a");
@@ -709,30 +740,57 @@ const submitCandidate = async () => {
   setCandBusy(true);
   setCandErr("");
   setCandOk("");
-  // Validación rápida (mínima escritura, pero campos críticos obligatorios)
+  // Validación guiada (mínima escritura, pero feedback claro por sección)
+  const missingBySection = {
+    "1) Datos personales": [],
+    "2) Contacto y ubicación": [],
+    "3) Perfil laboral": [],
+    "4) Experiencia y formación": [],
+    "5) Situación y preferencias": [],
+  };
+
+  const addMiss = (section, label) => {
+    if (!missingBySection[section]) missingBySection[section] = [];
+    missingBySection[section].push(label);
+  };
+
   const dniDigits = String(cand.dni || "").replace(/\D+/g, "");
   const emailOk = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(cand.correo || "").trim());
-  if (!String(cand.nombre||"").trim()) { setCandErr("Nombre requerido"); setCandBusy(false); return; }
-  if (!String(cand.apellido||"").trim()) { setCandErr("Apellido requerido"); setCandBusy(false); return; }
-  if (!(dniDigits.length >= 7 && dniDigits.length <= 9)) { setCandErr("DNI inválido"); setCandBusy(false); return; }
-  if (!String(cand.nacionalidad||"").trim()) { setCandErr("Nacionalidad requerida"); setCandBusy(false); return; }
-  if (!String(cand.estado_civil||"").trim()) { setCandErr("Estado civil requerido"); setCandBusy(false); return; }
-  if (!String(cand.hijos||"").trim()) { setCandErr("Hijos requerido"); setCandBusy(false); return; }
-  if (!String(cand.telefono||"").trim()) { setCandErr("Teléfono requerido"); setCandBusy(false); return; }
-  if (!emailOk) { setCandErr("Correo inválido"); setCandBusy(false); return; }
-  if (!String(cand.localidad||"").trim()) { setCandErr("Localidad requerida"); setCandBusy(false); return; }
-  if (!String(cand.area_trabajo||"").trim()) { setCandErr("Área de trabajo requerida"); setCandBusy(false); return; }
-  // Nivel sólo para Eléctrica/Mecánica
+
+  if (!String(cand.nombre||"").trim()) addMiss("1) Datos personales", "Nombre");
+  if (!String(cand.apellido||"").trim()) addMiss("1) Datos personales", "Apellido");
+  if (!(dniDigits.length >= 7 && dniDigits.length <= 9)) addMiss("1) Datos personales", "DNI (7–9 dígitos)");
+  if (!String(cand.nacionalidad||"").trim()) addMiss("1) Datos personales", "Nacionalidad");
+  if (!String(cand.estado_civil||"").trim()) addMiss("1) Datos personales", "Estado civil");
+  if (!String(cand.hijos||"").trim()) addMiss("1) Datos personales", "Hijos");
+
+  if (!String(cand.telefono||"").trim()) addMiss("2) Contacto y ubicación", "Teléfono");
+  if (!emailOk) addMiss("2) Contacto y ubicación", "Correo válido");
+  if (!String(cand.localidad||"").trim()) addMiss("2) Contacto y ubicación", "Localidad");
+
+  if (!String(cand.area_trabajo||"").trim()) addMiss("3) Perfil laboral", "Área de trabajo");
   const needsNivel = ["Eléctrica (Industrial)", "Mecánica (Industrial)"].includes(String(cand.area_trabajo||""));
-  if (needsNivel && !String(cand.nivel||"").trim()) { setCandErr("Nivel requerido"); setCandBusy(false); return; }
-  if (!String(cand.especialidad||"").trim()) { setCandErr("Especialidad requerida"); setCandBusy(false); return; }
-  // Soldadura: categoría de soldador (si la especialidad es Soldador)
+  if (needsNivel && !String(cand.nivel||"").trim()) addMiss("3) Perfil laboral", "Nivel");
+  if (!String(cand.especialidad||"").trim()) addMiss("3) Perfil laboral", "Especialidad");
   const isSoldArea = String(cand.area_trabajo||"") === "Soldadura, cañerías y montaje";
   const isSoldEsp = /\bSoldador\b/i.test(String(cand.especialidad||""));
-  if (isSoldArea && isSoldEsp && !String(cand.soldador_categoria||"").trim()) { setCandErr("Indicá tu categoría de soldador"); setCandBusy(false); return; }
-  if (String(cand.especialidad) === "Otros" && !(String(cand.especialidad_otro||"").trim().length >= 3)) { setCandErr("Completá 'Otros' (mínimo 3 caracteres)"); setCandBusy(false); return; }
-  if (!String(cand.rango_experiencia||"").trim()) { setCandErr("Años de experiencia requerido"); setCandBusy(false); return; }
-  if (!String(cand.nivel_educativo||"").trim()) { setCandErr("Nivel educativo requerido"); setCandBusy(false); return; }
+  if (isSoldArea && isSoldEsp && !String(cand.soldador_categoria||"").trim()) addMiss("3) Perfil laboral", "Categoría de soldador");
+  if (String(cand.especialidad) === "Otros" && !(String(cand.especialidad_otro||"").trim().length >= 3)) addMiss("3) Perfil laboral", "Otros (mínimo 3 caracteres)");
+
+  if (!String(cand.rango_experiencia||"").trim()) addMiss("4) Experiencia y formación", "Años de experiencia");
+  if (!String(cand.nivel_educativo||"").trim()) addMiss("4) Experiencia y formación", "Nivel educativo");
+
+  const sectionsWithMissing = Object.entries(missingBySection).filter(([_, arr]) => (arr||[]).length > 0);
+  if (sectionsWithMissing.length) {
+    const msg = [
+      "Faltan campos obligatorios. Revisá:",
+      ...sectionsWithMissing.map(([sec, arr]) => `• ${sec}: ${arr.join(", ")}`),
+    ].join("\n");
+    setCandErr(msg);
+    setCandBusy(false);
+    return;
+  }
+
   try {
     const payload = {
       ...cand,
@@ -1161,14 +1219,14 @@ useEffect(() => {
         throw new Error(t || "No se pudo descargar la planilla.");
       }
       const blob = await r.blob();
-      const url = URL.createObjectURL(blob);
+      const downloadUrl = URL.createObjectURL(blob);
       const a = document.createElement("a");
-      a.href = url;
+      a.href = downloadUrl;
       a.download = "uic_socios.csv";
       document.body.appendChild(a);
       a.click();
       a.remove();
-      URL.revokeObjectURL(url);
+      URL.revokeObjectURL(downloadUrl);
     } catch (e) {
       alert(`Error al descargar CSV: ${e?.message || e}`);
     } finally {
@@ -2252,9 +2310,9 @@ function prettySocioCategory(raw) {
 
 function downloadJson(filename, obj) {
   const blob = new Blob([JSON.stringify(obj, null, 2)], { type: "application/json" });
-  const url = URL.createObjectURL(blob);
+  const downloadUrl = URL.createObjectURL(blob);
   const a = document.createElement("a");
-  a.href = url;
+  a.href = downloadUrl;
   a.download = filename;
   document.body.appendChild(a);
   a.click();
@@ -2573,7 +2631,7 @@ async function submitSocioForm() {
                 {candErr && <div className="error" style={{ marginTop: 10 }}>{candErr}</div>}
                 {candOk && <div className="ok" style={{ marginTop: 10 }}>{candOk}</div>}
 
-                <details open style={{ marginTop: 10 }}>
+                <details style={{ marginTop: 10 }}>
                   <summary><b>1) Datos personales</b></summary>
                   <div className="formGrid" style={{ marginTop: 10 }}>
                     <label>
@@ -2611,7 +2669,7 @@ async function submitSocioForm() {
                   </div>
                 </details>
 
-                <details open style={{ marginTop: 10 }}>
+                <details style={{ marginTop: 10 }}>
                   <summary><b>2) Contacto y ubicación</b></summary>
                   <div className="formGrid" style={{ marginTop: 10 }}>
                     <label>
@@ -2636,7 +2694,7 @@ async function submitSocioForm() {
                   </div>
                 </details>
 
-                <details open style={{ marginTop: 10 }}>
+                <details style={{ marginTop: 10 }}>
                   <summary><b>3) Perfil laboral</b></summary>
                   <div className="formGrid" style={{ marginTop: 10 }}>
                     <label>
@@ -2736,7 +2794,7 @@ async function submitSocioForm() {
 </div>
                 </details>
 
-                <details open style={{ marginTop: 10 }}>
+                <details style={{ marginTop: 10 }}>
                   <summary><b>4) Experiencia y formación</b></summary>
                   <div className="formGrid" style={{ marginTop: 10 }}>
                     <label>
@@ -2763,7 +2821,7 @@ async function submitSocioForm() {
                   </div>
                 </details>
 
-                <details open style={{ marginTop: 10 }}>
+                <details style={{ marginTop: 10 }}>
                   <summary><b>5) Situación y preferencias</b></summary>
                   <div className="formGrid" style={{ marginTop: 10 }}>
                     <label>
@@ -2936,7 +2994,7 @@ async function submitSocioForm() {
                       Totales por sección (mostramos <b>0</b> donde no hay registros).
                     </div>
 
-                    <details open style={{ marginTop: 10 }}>
+                    <details style={{ marginTop: 10 }}>
                       <summary><b>Sección 1</b> — Datos personales</summary>
                       <div className="grid2" style={{ marginTop: 10 }}>
                         <div>
@@ -3140,51 +3198,51 @@ async function submitSocioForm() {
     <div className="manualBody">
 <h3>Objetivo</h3>
 <div className="muted">
-  La App UIC Campana (PWA) centraliza publicaciones institucionales, beneficios, comunicación socio ↔ administrador
-  y el módulo “Bolsa de Trabajo” para registrar perfiles laborales con mínima escritura.
-</div>
-
-<h3>Instalación (iPhone / Android)</h3>
-<div className="muted">
-  Abrí el enlace oficial en tu navegador y luego agregá la app a tu pantalla de inicio:
-  <div style={{ marginTop: 6 }}><b>Enlace oficial:</b> https://uic-campana-app.onrender.com</div>
-  <div style={{ marginTop: 6 }}>
-    La guía completa está en <b>Ajustes → Descargar manual (PDF)</b>.
-  </div>
+  Esta app PWA centraliza publicaciones, agenda, beneficios y comunicación socio ↔ administrador.
+  Además incorpora accesos protegidos para evitar que un no-socio navegue áreas sensibles.
 </div>
 
 <h3>Navegación inferior</h3>
 <ul>
-  <li><b>Inicio</b>: accesos rápidos y destacados.</li>
-  <li><b>Publicaciones</b>: listado con búsqueda y filtros.</li>
-  <li><b>Pro.Industrial</b>: acceso rápido a Promoción Industrial.</li>
-  <li><b>Manual</b>: ayuda rápida (esta pantalla).</li>
-  <li><b>Ajustes</b>: versión, forzar actualización, zoom, y herramientas.</li>
+  <li><b>Inicio</b>: accesos rápidos + últimas publicaciones.</li>
+  <li><b>Publicaciones</b>: listado completo con búsqueda y filtros.</li>
+  <li><b>Pro.Industrial</b>: publicaciones de la categoría “Promoción Industrial”.</li>
+  <li><b>Manual</b>: esta ayuda.</li>
+  <li><b>Ajustes</b>: versión, clave admin, login socio, y utilidades (incluye “Bloquear zoom”).</li>
 </ul>
 
-<h3>Bolsa de Trabajo</h3>
+<h3>Inicio (accesos rápidos)</h3>
 <ul>
-  <li><b>Alta de candidato</b>: formulario por secciones con listas desplegables (se escribe lo mínimo).</li>
-  <li>Los campos obligatorios llevan <b>*</b>. Si falta algo, la app lo marca y no deja finalizar.</li>
-  <li>Para <b>Mecánica</b> y <b>Eléctrica</b> podés tildar equipos/herramientas relevantes (expertise).</li>
-  <li>Si la especialidad es <b>Soldador</b>, se solicita <b>Categoría</b> (1/2/3 u otras opciones).</li>
+  <li><b>Bolsa de trabajo</b>: acceso al módulo (en desarrollo).</li>
+  <li><b>Beneficios</b>: beneficios para socios y comunidad (desde Inicio).</li>
+  <li><b>Agenda</b>: eventos y actividades (desde Inicio).</li>
+  <li><b>Requerimientos institucionales</b>: acceso protegido por clave (sirve clave de socio o clave admin).</li>
 </ul>
 
-<h3>Buscar CV (tablero + filtros + ficha)</h3>
-<div className="muted">
-  La consulta de la base (tablero de totales, buscador con filtros y ficha del candidato) está protegida.
-  Requiere clave válida de socio o clave de administrador. El administrador además puede exportar Excel (.xlsx).
-</div>
+<h3>Portal del Socio</h3>
+<ul>
+  <li>Ingreso por <b>número de socio</b> + <b>clave</b>.</li>
+  <li>Clave por defecto: se genera con el nombre de la empresa (normalizada).</li>
+  <li>La app permite <b>cambiar clave</b> desde la sección del socio (si está habilitado en tu versión instalada).</li>
+</ul>
 
 <h3>Comunicación (mensajería)</h3>
 <ul>
-  <li><b>Socio → Administrador</b> y <b>Administrador → Socio</b> con historial.</li>
-  <li>Tildes estilo WhatsApp: <b>✓✓</b> gris = entregado, <b>✓✓</b> celeste = leído.</li>
+  <li><b>Socio → Administrador</b>: consultas y pedidos.</li>
+  <li><b>Administrador → Socio</b>: respuestas y seguimiento.</li>
+  <li>Tildes estilo WhatsApp: <b>✓</b> enviado, <b>✓</b> entregado, <b>✓✓</b> leído (celeste).</li>
 </ul>
 
-<h3>Zoom</h3>
+<h3>Accesos protegidos</h3>
 <div className="muted">
-  El zoom inicia <b>bloqueado por defecto</b>. En Ajustes podés desbloquearlo si lo necesitás.
+  Si alguien que no es socio intenta abrir “Requerimientos institucionales”, deberá ingresar una clave válida.
+  Esto evita que visitantes de “Bolsa de trabajo” exploren botones delicados.
+</div>
+
+<h3>Bloquear zoom</h3>
+<div className="muted">
+  En Ajustes podés activar/desactivar el bloqueo de zoom para evitar que la pantalla se agrande al tipear
+  o al hacer gesto con los dedos.
 </div>
             </div>
   </section>
@@ -4218,9 +4276,23 @@ async function submitSocioForm() {
                 <button className="btnPrimary" onClick={async () => { setRefreshing(true); try { await hardRefreshWithBadge(); } finally { setTimeout(() => setRefreshing(false), 8000); } }}>Forzar actualización</button></div>
 
               <div style={{ marginTop: 12 }}>
-                <button className="btnSecondary" onClick={() => {
-                  try { window.open("/manual_uic.pdf", "_blank"); } catch (_) { window.location.href = "/manual_uic.pdf"; }
-                }}>
+                <button className="btnSecondary" onClick={async () => {
+                    try {
+                      const r = await fetch("/manual_uic.pdf", { cache: "no-store" });
+                      if (!r.ok) throw new Error("No se pudo descargar el manual.");
+                      const blob = await r.blob();
+                      const a = document.createElement("a");
+                      const manualUrl = URL.createObjectURL(blob);
+                      a.href = manualUrl;
+                      a.download = "Manual_UIC_App.pdf";
+                      document.body.appendChild(a);
+                      a.click();
+                      a.remove();
+                      URL.revokeObjectURL(manualUrl);
+                    } catch (e) {
+                      alert(String(e?.message || e));
+                    }
+                  }}>
                   Descargar manual (PDF)
                 </button>
                 <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>
