@@ -3,7 +3,7 @@ import "./index.css";
 import logoUIC from "./assets/logo-uic.jpeg";
 
 // Versión visible (footer / ajustes)
-const APP_VERSION = "0.32.1";
+const APP_VERSION = "0.33.0";
 const BUILD_STAMP = (typeof __UIC_BUILD_STAMP__ !== "undefined") ? __UIC_BUILD_STAMP__ : "";
 const PWA_CACHE_ID = (typeof __UIC_CACHE_ID__ !== "undefined") ? __UIC_CACHE_ID__ : "";
 const PWA_COMMIT = (typeof __UIC_COMMIT__ !== "undefined") ? __UIC_COMMIT__ : "";
@@ -146,9 +146,11 @@ export default function App() {
   const ZOOM_LOCK_KEY = "uic_zoom_locked_v1";
   const [zoomLocked, setZoomLocked] = useState(() => {
     try {
-      return localStorage.getItem(ZOOM_LOCK_KEY) === "1";
+      const v = localStorage.getItem(ZOOM_LOCK_KEY);
+      if (v === null) return true;
+      return v === "1";
     } catch (_) {
-      return false;
+      return true;
     }
   });
   const [zoomToast, setZoomToast] = useState("");
@@ -401,6 +403,7 @@ const [cand, setCand] = useState({
   observaciones: "",
   herramientas_mecanica: [],
   instrumentos_electrica: [],
+  soldador_categoria: "",
 });
 
 const [jobsStats, setJobsStats] = useState(null);
@@ -444,6 +447,8 @@ const NIVEL_EDU = ["Primaria", "Secundaria", "Terciaria", "Universitaria", "Otro
 const ESTADO_CIVIL = ["Soltero/a", "Casado/a", "Unión convivencial / Concubinato", "Separado/a", "Divorciado/a", "Viudo/a"];
 
 const HIJOS_OPC = ["Sin hijos", "1", "2", "Más de 2"];
+
+const SOLDADOR_CAT = ["No certificado / Sin certificación", "Soldador 1 (Nivel 1)", "Soldador 2 (Nivel 2)", "Soldador 3 (Nivel 3)", "Otro / No especifica"];
 
 // Máquinas-herramienta (Mecánica) – multiselección
 const MAQ_HERR_MECANICA = [
@@ -634,7 +639,7 @@ const searchJobs = async () => {
   }
 };
 
-const exportJobsTsv = async () => {
+const exportJobsXlsx = async () => {
   if (!API_BASE) return;
   if (!adminToken) { setJobsErr("Solo el administrador puede descargar la base completa."); return; }
   try {
@@ -647,7 +652,7 @@ const exportJobsTsv = async () => {
     const a = document.createElement("a");
     const url = URL.createObjectURL(blob);
     a.href = url;
-    a.download = `uic_bolsa_trabajo_${new Date().toISOString().slice(0,10)}.tsv`;
+    a.download = `uic_bolsa_trabajo_${new Date().toISOString().slice(0,10)}.xlsx`;
     document.body.appendChild(a);
     a.click();
     a.remove();
@@ -679,6 +684,10 @@ const submitCandidate = async () => {
   const needsNivel = ["Eléctrica (Industrial)", "Mecánica (Industrial)"].includes(String(cand.area_trabajo||""));
   if (needsNivel && !String(cand.nivel||"").trim()) { setCandErr("Nivel requerido"); setCandBusy(false); return; }
   if (!String(cand.especialidad||"").trim()) { setCandErr("Especialidad requerida"); setCandBusy(false); return; }
+  // Soldadura: categoría de soldador (si la especialidad es Soldador)
+  const isSoldArea = String(cand.area_trabajo||"") === "Soldadura, cañerías y montaje";
+  const isSoldEsp = /\bSoldador\b/i.test(String(cand.especialidad||""));
+  if (isSoldArea && isSoldEsp && !String(cand.soldador_categoria||"").trim()) { setCandErr("Indicá tu categoría de soldador"); setCandBusy(false); return; }
   if (String(cand.especialidad) === "Otros" && !(String(cand.especialidad_otro||"").trim().length >= 3)) { setCandErr("Completá 'Otros' (mínimo 3 caracteres)"); setCandBusy(false); return; }
   if (!String(cand.rango_experiencia||"").trim()) { setCandErr("Años de experiencia requerido"); setCandBusy(false); return; }
   if (!String(cand.nivel_educativo||"").trim()) { setCandErr("Nivel educativo requerido"); setCandBusy(false); return; }
@@ -721,6 +730,7 @@ const submitCandidate = async () => {
       observaciones: "",
       herramientas_mecanica: [],
       instrumentos_electrica: [],
+      soldador_categoria: "",
     });
   } catch (e) {
     setCandErr(String(e?.message || e));
@@ -736,6 +746,7 @@ useEffect(() => {
     nivel: "",
     especialidad: "",
     especialidad_otro: "",
+    soldador_categoria: "",
   }));
   // eslint-disable-next-line react-hooks/exhaustive-deps
 }, [cand.area_trabajo]);
@@ -804,7 +815,7 @@ useEffect(() => {
     try {
       if (!isAdmin) {
         alert("Acción disponible solo con clave de administrador.");
-        return false;
+        return true;
       }
       const ok1 = window.confirm(message);
       if (!ok1) return false;
@@ -814,11 +825,11 @@ useEffect(() => {
       const b = String(entered || "").trim();
       if (!a || b !== a) {
         alert("Clave incorrecta. Acción cancelada.");
-        return false;
+        return true;
       }
       return true;
     } catch (_) {
-      return false;
+      return true;
     }
   }
 
@@ -2612,6 +2623,16 @@ async function submitSocioForm() {
                       </select>
                     </label>
 
+                    {(cand.area_trabajo === "Soldadura, cañerías y montaje") && (/\bSoldador\b/i.test(String(cand.especialidad||""))) && (
+                      <label>
+                        Categoría de soldador*<br />
+                        <select value={cand.soldador_categoria} onChange={(e) => setCand((p) => ({ ...p, soldador_categoria: e.target.value }))}>
+                          <option value="">Seleccionar…</option>
+                          {SOLDADOR_CAT.map((x) => <option key={x} value={x}>{x}</option>)}
+                        </select>
+                      </label>
+                    )}
+
                     {cand.especialidad === "Otros" && (
                       <label>
                         Otros (especificar)*<br />
@@ -2772,7 +2793,7 @@ async function submitSocioForm() {
                     <button className="btnPrimary" disabled={jobsBusy} onClick={searchJobs}>{jobsBusy ? "Buscando…" : "Buscar"}</button>
                     <button className="btnSecondary" disabled={jobsBusy} onClick={loadJobsStats}>Actualizar</button>
                   </div>
-                  <button className="btnSecondary" disabled={!adminToken} onClick={exportJobsTsv}>
+                  <button className="btnSecondary" disabled={!adminToken} onClick={exportJobsXlsx}>
                     Descargar Excel
                   </button>
                 </div>
@@ -4023,6 +4044,17 @@ async function submitSocioForm() {
             <div className="muted">
               <div>Versión: {APP_VERSION}</div><div style={{ marginTop: 12 }}>
                 <button className="btnPrimary" onClick={async () => { setRefreshing(true); try { await hardRefreshWithBadge(); } finally { setTimeout(() => setRefreshing(false), 8000); } }}>Forzar actualización</button></div>
+
+              <div style={{ marginTop: 12 }}>
+                <button className="btnSecondary" onClick={() => {
+                  try { window.open("/manual_uic.pdf", "_blank"); } catch (_) { window.location.href = "/manual_uic.pdf"; }
+                }}>
+                  Descargar manual (PDF)
+                </button>
+                <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>
+                  Manual completo en PDF para leer o compartir.
+                </div>
+              </div>
 
               <div style={{ marginTop: 12 }}>
                 <button

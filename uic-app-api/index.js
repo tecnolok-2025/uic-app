@@ -45,7 +45,7 @@ try {
   // Si falla, seguimos con defaults.
 }
 
-const API_VERSION = (process.env.API_VERSION || PKG_VERSION || "0.28.3").trim();
+const API_VERSION = (process.env.API_VERSION || PKG_VERSION || "0.33.0").trim();
 const API_BUILD_STAMP = (process.env.API_BUILD_STAMP || new Date().toISOString()).trim();
 
 
@@ -541,6 +541,7 @@ async function initDb() {
         nivel TEXT DEFAULT '',
         especialidad TEXT NOT NULL,
         especialidad_otro TEXT DEFAULT '',
+        soldador_categoria TEXT DEFAULT '',
 
         rango_experiencia TEXT NOT NULL,
         nivel_educativo TEXT NOT NULL,
@@ -558,6 +559,7 @@ async function initDb() {
     // v0.32+: nuevas columnas (si venís de una DB existente)
     try { await pool.query("ALTER TABLE uic_job_candidates ADD COLUMN IF NOT EXISTS herramientas_mecanica TEXT DEFAULT '[]'"); } catch (e) {}
     try { await pool.query("ALTER TABLE uic_job_candidates ADD COLUMN IF NOT EXISTS instrumentos_electrica TEXT DEFAULT '[]'"); } catch (e) {}
+    try { await pool.query("ALTER TABLE uic_job_candidates ADD COLUMN IF NOT EXISTS soldador_categoria TEXT DEFAULT ''"); } catch (e) {}
 
     await pool.query(`CREATE INDEX IF NOT EXISTS uic_job_candidates_created_idx ON uic_job_candidates(created_at DESC)`);
     await pool.query(`CREATE INDEX IF NOT EXISTS uic_job_candidates_area_idx ON uic_job_candidates(area_trabajo)`);
@@ -2421,6 +2423,7 @@ app.get("/jobs/export", requireAdmin, async (req, res) => {
       "nivel",
       "especialidad",
       "especialidad_otro",
+      "soldador_categoria",
       "rango_experiencia",
       "nivel_educativo",
       "tiene_capacitacion",
@@ -2474,6 +2477,7 @@ function facetStats(items) {
     area_trabajo: {},
     nivel: {},
     especialidad: {},
+    soldador_categoria: {},
     rango_experiencia: {},
     nivel_educativo: {},
     tiene_capacitacion: { SI: 0, NO: 0 },
