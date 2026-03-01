@@ -194,6 +194,9 @@ function writeCommsStore(store) {
 
 let COMMS_STORE = readCommsStore();
 
+// Bolsa de Trabajo (fallback JSON si no hay DB)
+let JOBS_STORE = { items: [] };
+
 
 /* ---------------------- Persistencia (Opción B: DB externa) ---------------------- */
 
@@ -514,6 +517,44 @@ async function initDb() {
     await pool.query(`CREATE INDEX IF NOT EXISTS uic_messages_admin_unread_idx ON uic_messages(read_by_admin, from_role)`);
     await pool.query(`CREATE INDEX IF NOT EXISTS uic_messages_member_unread_idx ON uic_messages(read_by_member, from_role)`);
 
+    // Bolsa de Trabajo: candidatos
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS uic_job_candidates (
+        id TEXT PRIMARY KEY,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+
+        nombre TEXT NOT NULL,
+        apellido TEXT NOT NULL,
+        dni TEXT NOT NULL,
+        nacionalidad TEXT NOT NULL,
+        estado_civil TEXT NOT NULL,
+        hijos TEXT NOT NULL,
+
+        telefono TEXT NOT NULL,
+        correo TEXT NOT NULL,
+        localidad TEXT NOT NULL,
+        direccion TEXT DEFAULT '',
+
+        area_trabajo TEXT NOT NULL,
+        nivel TEXT DEFAULT '',
+        especialidad TEXT NOT NULL,
+        especialidad_otro TEXT DEFAULT '',
+
+        rango_experiencia TEXT NOT NULL,
+        nivel_educativo TEXT NOT NULL,
+        tiene_capacitacion BOOLEAN NOT NULL,
+
+        trabaja_actualmente BOOLEAN NOT NULL,
+        sueldo_pretendido TEXT DEFAULT '',
+        ultimo_trabajo TEXT DEFAULT '',
+        observaciones TEXT DEFAULT ''
+      )
+    `);
+    await pool.query(`CREATE INDEX IF NOT EXISTS uic_job_candidates_created_idx ON uic_job_candidates(created_at DESC)`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS uic_job_candidates_area_idx ON uic_job_candidates(area_trabajo)`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS uic_job_candidates_localidad_idx ON uic_job_candidates(localidad)`);
+
 dbReady = true;
     console.log("✅ DB externa habilitada (DATABASE_URL). Persistencia OK.");
   } catch (e) {
@@ -665,6 +706,30 @@ function requireAdmin(req, res, next) {
   const t = (req.header("x-admin-token") || "").trim();
   if (t !== EVENT_ADMIN_TOKEN) return res.status(401).json({ error: "No autorizado." });
   next();
+}
+
+// Access helper: permite socio logueado (Bearer) o admin (x-admin-token)
+function requireAccess(req, res, next) {
+  // admin
+  const t = (req.header("x-admin-token") || "").trim();
+  if (EVENT_ADMIN_TOKEN && t && t === EVENT_ADMIN_TOKEN) {
+    req.access = { role: "admin" };
+    return next();
+  }
+
+  // member token (Bearer or x-member-token)
+  try {
+    const hdrToken = String(req.header("x-member-token") || "").trim();
+    const auth = String(req.header("authorization") || "");
+    const m = auth.match(/^Bearer\s+(.+)$/i);
+    const token = (hdrToken || (m?.[1] ? String(m[1]).trim() : "")).trim();
+    if (!token) return res.status(401).json({ error: "No autorizado." });
+    const parsed = verifyMemberToken(token);
+    req.access = { role: "member", memberNo: parsed.memberNo };
+    return next();
+  } catch (_) {
+    return res.status(401).json({ error: "No autorizado." });
+  }
 }
 
 
@@ -2111,6 +2176,302 @@ app.post("/admin/messages/thread/:memberNo/reply", requireAdmin, async (req, res
     return res.status(500).json({ error: "Error interno" });
   }
 });
+
+
+/* --------------------- Bolsa de Trabajo (Candidatos) --------------------- */
+
+function _isEmail(s) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(s || "").trim());
+}
+
+function _onlyDigits(s) {
+  return String(s || "").replace(/\D+/g, "");
+}
+
+function _newId(prefix = "cand") {
+  const r = Math.random().toString(16).slice(2);
+  return `${prefix}_${Date.now().toString(36)}_${r}`;
+}
+
+function _sanitizeText(s, maxLen) {
+  const t = String(s || "").trim();
+  if (!maxLen) return t;
+  return t.length > maxLen ? t.slice(0, maxLen) : t;
+}
+
+// Alta pública de candidato (sin clave)
+app.post("/jobs/candidates", async (req, res) => {
+  try {
+    if (__rateLimited(req, res, "jobs-candidate", 30, 10 * 60 * 1000)) return;
+
+    const b = req.body || {};
+    const nombre = _sanitizeText(b.nombre, 60);
+    const apellido = _sanitizeText(b.apellido, 60);
+    const dni = _onlyDigits(b.dni);
+    const nacionalidad = _sanitizeText(b.nacionalidad, 60);
+    const estado_civil = _sanitizeText(b.estado_civil, 40);
+    const hijos = _sanitizeText(b.hijos, 20);
+
+    const telefono = _sanitizeText(b.telefono, 30);
+    const correo = _sanitizeText(b.correo, 120);
+    const localidad = _sanitizeText(b.localidad, 80);
+    const direccion = _sanitizeText(b.direccion, 120);
+
+    const area_trabajo = _sanitizeText(b.area_trabajo, 80);
+    const nivel = _sanitizeText(b.nivel, 40);
+    const especialidad = _sanitizeText(b.especialidad, 120);
+    const especialidad_otro = _sanitizeText(b.especialidad_otro, 60);
+
+    const rango_experiencia = _sanitizeText(b.rango_experiencia, 20);
+    const nivel_educativo = _sanitizeText(b.nivel_educativo, 30);
+    const tiene_capacitacion = Boolean(b.tiene_capacitacion);
+
+    const trabaja_actualmente = Boolean(b.trabaja_actualmente);
+    const sueldo_pretendido = _sanitizeText(b.sueldo_pretendido, 30);
+    const ultimo_trabajo = _sanitizeText(b.ultimo_trabajo, 80);
+    const observaciones = _sanitizeText(b.observaciones, 300);
+
+    // Validaciones mínimas
+    if (!nombre) return res.status(400).json({ error: "Nombre requerido" });
+    if (!apellido) return res.status(400).json({ error: "Apellido requerido" });
+    if (!(dni.length >= 7 && dni.length <= 9)) return res.status(400).json({ error: "DNI inválido" });
+    if (!nacionalidad) return res.status(400).json({ error: "Nacionalidad requerida" });
+    if (!estado_civil) return res.status(400).json({ error: "Estado civil requerido" });
+    if (!hijos) return res.status(400).json({ error: "Hijos requerido" });
+    if (!telefono) return res.status(400).json({ error: "Teléfono requerido" });
+    if (!_isEmail(correo)) return res.status(400).json({ error: "Correo inválido" });
+    if (!localidad) return res.status(400).json({ error: "Localidad requerida" });
+    if (!area_trabajo) return res.status(400).json({ error: "Área de trabajo requerida" });
+    if (!especialidad) return res.status(400).json({ error: "Especialidad requerida" });
+    if (!rango_experiencia) return res.status(400).json({ error: "Experiencia requerida" });
+    if (!nivel_educativo) return res.status(400).json({ error: "Nivel educativo requerido" });
+
+    const id = _newId();
+    const now = new Date().toISOString();
+
+    if (!dbReady) {
+      // fallback JSON (no persistente en Render si no hay DB)
+      JOBS_STORE = JOBS_STORE || { items: [] };
+      JOBS_STORE.items = JOBS_STORE.items || [];
+      JOBS_STORE.items.unshift({
+        id,
+        created_at: now,
+        updated_at: now,
+        nombre,
+        apellido,
+        dni,
+        nacionalidad,
+        estado_civil,
+        hijos,
+        telefono,
+        correo,
+        localidad,
+        direccion,
+        area_trabajo,
+        nivel,
+        especialidad,
+        especialidad_otro,
+        rango_experiencia,
+        nivel_educativo,
+        tiene_capacitacion,
+        trabaja_actualmente,
+        sueldo_pretendido,
+        ultimo_trabajo,
+        observaciones,
+      });
+      return res.json({ ok: true, id });
+    }
+
+    await pool.query(
+      `INSERT INTO uic_job_candidates (
+        id, nombre, apellido, dni, nacionalidad, estado_civil, hijos,
+        telefono, correo, localidad, direccion,
+        area_trabajo, nivel, especialidad, especialidad_otro,
+        rango_experiencia, nivel_educativo, tiene_capacitacion,
+        trabaja_actualmente, sueldo_pretendido, ultimo_trabajo, observaciones,
+        created_at, updated_at
+      ) VALUES (
+        $1,$2,$3,$4,$5,$6,$7,
+        $8,$9,$10,$11,
+        $12,$13,$14,$15,
+        $16,$17,$18,
+        $19,$20,$21,$22,
+        NOW(), NOW()
+      )`,
+      [
+        id,
+        nombre,
+        apellido,
+        dni,
+        nacionalidad,
+        estado_civil,
+        hijos,
+        telefono,
+        correo,
+        localidad,
+        direccion || "",
+        area_trabajo,
+        nivel || "",
+        especialidad,
+        especialidad_otro || "",
+        rango_experiencia,
+        nivel_educativo,
+        tiene_capacitacion,
+        trabaja_actualmente,
+        sueldo_pretendido || "",
+        ultimo_trabajo || "",
+        observaciones || "",
+      ]
+    );
+    return res.json({ ok: true, id });
+  } catch (e) {
+    console.log("⚠️ jobs/candidates error:", e?.message || e);
+    return res.status(500).json({ error: "Error interno" });
+  }
+});
+
+// Estadísticas para pantalla de “registros” (requiere socio o admin)
+app.get("/jobs/stats", requireAccess, async (req, res) => {
+  try {
+    if (!dbReady) {
+      const items = (JOBS_STORE?.items || []).slice();
+      return res.json({ ok: true, total: items.length, facets: facetStats(items) });
+    }
+
+    const r = await pool.query("SELECT * FROM uic_job_candidates");
+    const items = (r.rows || []).map((x) => ({
+      ...x,
+      created_at: x.created_at ? new Date(x.created_at).toISOString() : "",
+      updated_at: x.updated_at ? new Date(x.updated_at).toISOString() : "",
+    }));
+    return res.json({ ok: true, total: items.length, facets: facetStats(items) });
+  } catch (e) {
+    console.log("⚠️ jobs/stats error:", e?.message || e);
+    return res.status(500).json({ error: "Error interno" });
+  }
+});
+
+// Búsqueda simple (requiere socio o admin)
+app.get("/jobs/search", requireAccess, async (req, res) => {
+  try {
+    const q = String(req.query?.q || "").trim().toLowerCase();
+    const area = String(req.query?.area || "").trim();
+    const localidad = String(req.query?.localidad || "").trim();
+
+    const filterFn = (it) => {
+      if (area && String(it.area_trabajo || "") !== area) return false;
+      if (localidad && String(it.localidad || "") !== localidad) return false;
+      if (!q) return true;
+      const hay = `${it.nombre || ""} ${it.apellido || ""} ${it.dni || ""} ${it.localidad || ""} ${it.area_trabajo || ""} ${it.especialidad || ""} ${it.especialidad_otro || ""}`.toLowerCase();
+      return hay.includes(q);
+    };
+
+    if (!dbReady) {
+      const items = (JOBS_STORE?.items || []).filter(filterFn).slice(0, 200);
+      return res.json({ ok: true, items });
+    }
+
+    // DB: traemos todo y filtramos en memoria (simple; optimizable luego)
+    const r = await pool.query("SELECT * FROM uic_job_candidates ORDER BY created_at DESC");
+    const items = (r.rows || []).filter(filterFn).slice(0, 200);
+    return res.json({ ok: true, items });
+  } catch (e) {
+    console.log("⚠️ jobs/search error:", e?.message || e);
+    return res.status(500).json({ error: "Error interno" });
+  }
+});
+
+// Export TSV (Excel-friendly) – SOLO ADMIN
+app.get("/jobs/export", requireAdmin, async (req, res) => {
+  try {
+    let items = [];
+    if (!dbReady) items = (JOBS_STORE?.items || []);
+    else {
+      const r = await pool.query("SELECT * FROM uic_job_candidates ORDER BY created_at DESC");
+      items = r.rows || [];
+    }
+
+    const headers = [
+      "created_at",
+      "nombre",
+      "apellido",
+      "dni",
+      "nacionalidad",
+      "estado_civil",
+      "hijos",
+      "telefono",
+      "correo",
+      "localidad",
+      "direccion",
+      "area_trabajo",
+      "nivel",
+      "especialidad",
+      "especialidad_otro",
+      "rango_experiencia",
+      "nivel_educativo",
+      "tiene_capacitacion",
+      "trabaja_actualmente",
+      "sueldo_pretendido",
+      "ultimo_trabajo",
+      "observaciones",
+    ];
+    const esc = (v) => String(v ?? "").replace(/\t/g, " ").replace(/\n/g, " ").trim();
+
+    const lines = [headers.join("\t")].concat(
+      items.map((it) =>
+        headers
+          .map((h) => {
+            const v = it[h];
+            if (typeof v === "boolean") return v ? "SI" : "NO";
+            return esc(v);
+          })
+          .join("\t")
+      )
+    );
+
+    const out = lines.join("\n");
+    res.setHeader("Content-Type", "text/tab-separated-values; charset=utf-8");
+    res.setHeader("Content-Disposition", `attachment; filename="uic_bolsa_trabajo_${new Date().toISOString().slice(0, 10)}.tsv"`);
+    return res.send(out);
+  } catch (e) {
+    console.log("⚠️ jobs/export error:", e?.message || e);
+    return res.status(500).json({ error: "Error interno" });
+  }
+});
+
+function facetStats(items) {
+  const add = (obj, key) => {
+    const k = String(key || "").trim() || "(vacío)";
+    obj[k] = (obj[k] || 0) + 1;
+  };
+  const facets = {
+    nacionalidad: {},
+    estado_civil: {},
+    hijos: {},
+    localidad: {},
+    area_trabajo: {},
+    nivel: {},
+    especialidad: {},
+    rango_experiencia: {},
+    nivel_educativo: {},
+    tiene_capacitacion: { SI: 0, NO: 0 },
+    trabaja_actualmente: { SI: 0, NO: 0 },
+  };
+  for (const it of items) {
+    add(facets.nacionalidad, it.nacionalidad);
+    add(facets.estado_civil, it.estado_civil);
+    add(facets.hijos, it.hijos);
+    add(facets.localidad, it.localidad);
+    add(facets.area_trabajo, it.area_trabajo);
+    if (it.nivel) add(facets.nivel, it.nivel);
+    add(facets.especialidad, it.especialidad === "Otros" ? (it.especialidad_otro || "Otros") : it.especialidad);
+    add(facets.rango_experiencia, it.rango_experiencia);
+    add(facets.nivel_educativo, it.nivel_educativo);
+    facets.tiene_capacitacion[it.tiene_capacitacion ? "SI" : "NO"]++;
+    facets.trabaja_actualmente[it.trabaja_actualmente ? "SI" : "NO"]++;
+  }
+  return facets;
+}
 
 // Thread messages (member)
 app.get("/member/messages", requireMember, async (req, res) => {
