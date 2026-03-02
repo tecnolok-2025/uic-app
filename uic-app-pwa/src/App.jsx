@@ -1,9 +1,9 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import "./index.css";
+import { APP_VERSION } from "./version";
 import logoUIC from "./assets/logo-uic.jpeg";
 
 // Versión visible (footer / ajustes)
-const APP_VERSION = import.meta.env.VITE_APP_VERSION || "0.0.0";
 const BUILD_STAMP = (typeof __UIC_BUILD_STAMP__ !== "undefined") ? __UIC_BUILD_STAMP__ : "";
 const PWA_CACHE_ID = (typeof __UIC_CACHE_ID__ !== "undefined") ? __UIC_CACHE_ID__ : "";
 const PWA_COMMIT = (typeof __UIC_COMMIT__ !== "undefined") ? __UIC_COMMIT__ : "";
@@ -2367,7 +2367,7 @@ async function submitSocioForm() {
     <div className="app">
       <header className="topbar">
         <div className="brand">
-          <img className="brandLogo" src={logoUIC} alt="UIC Campana" />
+          <div className="brandLogoWrap"><img className="brandLogo" src={logoUIC} alt="UIC Campana" /></div>
         </div>
 
         <div className="topActions">
