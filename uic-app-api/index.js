@@ -2226,7 +2226,7 @@ app.post("/jobs/candidates", async (req, res) => {
 
     const telefono = _sanitizeText(b.telefono, 30);
     const correo = _sanitizeText(b.correo, 120);
-    const localidad = _sanitizeText(b.localidad, 80);
+    const localidad = _sanitizeText(b.localidad, 80).trim();
     const direccion = _sanitizeText(b.direccion, 120);
 
     const area_trabajo = _sanitizeText(b.area_trabajo, 80);
@@ -2290,6 +2290,8 @@ app.post("/jobs/candidates", async (req, res) => {
         sueldo_pretendido,
         ultimo_trabajo,
         observaciones,
+        herramientas_mecanica,
+        instrumentos_electrica,
       });
       return res.json({ ok: true, id });
     }
@@ -2383,9 +2385,16 @@ app.get("/jobs/search", requireAccess, async (req, res) => {
     const herramienta = String(req.query?.herramienta || "").trim();
     const instrumento = String(req.query?.instrumento || "").trim();
 
+    const _norm = (s) => String(s || "").trim().toLowerCase();
+
     const filterFn = (it) => {
       if (area && String(it.area_trabajo || "") !== area) return false;
-      if (localidad && String(it.localidad || "") !== localidad) return false;
+      if (localidad) {
+        const a = _norm(it.localidad);
+        const b = _norm(localidad);
+        // Igualdad case-insensitive + tolerancia a sufijos (ej: "Campana, Buenos Aires")
+        if (!(a === b || a.startsWith(b))) return false;
+      }
       if (nivel && String(it.nivel || "") !== nivel) return false;
       if (rango_experiencia && String(it.rango_experiencia || "") !== rango_experiencia) return false;
       if (nivel_educativo && String(it.nivel_educativo || "") !== nivel_educativo) return false;

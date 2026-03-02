@@ -3,7 +3,7 @@ import "./index.css";
 import logoUIC from "./assets/logo-uic.jpeg";
 
 // Versión visible (footer / ajustes)
-const APP_VERSION = "0.34.5";
+const APP_VERSION = "0.34.6";
 const BUILD_STAMP = (typeof __UIC_BUILD_STAMP__ !== "undefined") ? __UIC_BUILD_STAMP__ : "";
 const PWA_CACHE_ID = (typeof __UIC_CACHE_ID__ !== "undefined") ? __UIC_CACHE_ID__ : "";
 const PWA_COMMIT = (typeof __UIC_COMMIT__ !== "undefined") ? __UIC_COMMIT__ : "";
@@ -407,7 +407,6 @@ const [cand, setCand] = useState({
 });
 
 const [jobsStats, setJobsStats] = useState(null);
-const [jobsToast, setJobsToast] = useState("");
 const [jobsQ, setJobsQ] = useState("");
 const [jobsArea, setJobsArea] = useState("");
 const [jobsLoc, setJobsLoc] = useState("");
@@ -637,14 +636,6 @@ const jobsAuthHeaders = () => {
   return h;
 };
 
-const jobsIsAuthed = !!adminToken || !!memberToken;
-
-const ensureJobsAuth = (label = "continuar") => {
-  if (jobsIsAuthed) return true;
-  setJobsToast(`Para ${label} tenés que ingresar como socio o activar Administrador.`);
-  return false;
-};
-
 const facetCount = (facet, key) => {
   const v = jobsStats?.facets?.[facet]?.[key];
   return Number.isFinite(Number(v)) ? Number(v) : 0;
@@ -657,7 +648,7 @@ const sortedFacetEntries = (facet) => {
 
 const loadJobsStats = async () => {
   if (!API_BASE) { setJobsErr("No hay conexión con la API."); return; }
-  if (!ensureJobsAuth("ver CV y estadísticas")) return;
+  if (!adminToken && !memberToken) { setJobsErr("Ingresá como socio o administrador para buscar CV."); return; }
   setJobsBusy(true);
   setJobsErr("");
   try {
@@ -674,7 +665,7 @@ const loadJobsStats = async () => {
 
 const searchJobs = async () => {
   if (!API_BASE) { setJobsErr("No hay conexión con la API."); return; }
-  if (!ensureJobsAuth("buscar CV")) return;
+  if (!adminToken && !memberToken) { setJobsErr("Ingresá como socio o administrador para buscar CV."); return; }
   setJobsBusy(true);
   setJobsErr("");
   try {
@@ -2391,13 +2382,6 @@ async function submitSocioForm() {
         </div>
       )}
 
-      {!!jobsToast && (
-        <div className="toast">
-          <div className="toastText">{jobsToast}</div>
-          <button className="linkBtn" onClick={() => setJobsToast("")}>Cerrar</button>
-        </div>
-      )}
-
       <main className="content">
         {tab === "inicio" && (
           <>
@@ -2628,7 +2612,7 @@ async function submitSocioForm() {
                     setJobsErr("");
                     setJobsItems([]);
                     setJobsSelected(null);
-                    if (jobsIsAuthed) loadJobsStats();
+                    loadJobsStats();
                   }}
                 >
                   Buscar CV
@@ -2875,29 +2859,15 @@ async function submitSocioForm() {
                   Acceso protegido: solo socios logueados o administrador. Permite filtrar y ver CV cargados.
                 </div>
 
-                {!jobsIsAuthed ? (
-                  <div className="card" style={{ marginTop: 10 }}>
-                    <div className="cardTitle">Ingresar para ver CV y estadísticas</div>
-                    <div className="muted" style={{ marginTop: 6 }}>
-                      Para ver resultados, conteos y descargar Excel, necesitás ingresar como <b>socio</b> o activar <b>Administrador</b>.
-                    </div>
-                    <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 12 }}>
-                      <button className="btnPrimary" onClick={() => setTab("socios")}>
-                        Ingresar como socio
-                      </button>
-                      <button className="btnSecondary" onClick={() => setTab("ajustes")}>
-                        Activar Administrador
-                      </button>
-                    </div>
-                    <div className="muted" style={{ marginTop: 10, fontSize: 12 }}>
-                      Una vez logueado/activado, volvé a <b>Bolsa de Trabajo → Buscar CV</b>.
-                    </div>
+                {!adminToken && !memberToken && (
+                  <div className="alert" style={{ marginTop: 10 }}>
+                    Para buscar CV, ingresá como <b>socio</b> (Portal del Socio) o activá <b>Admin</b> en Ajustes.
                   </div>
-                ) : (
-                  <>
-                    {jobsErr && <div className="error" style={{ marginTop: 10 }}>{jobsErr}</div>}
+                )}
 
-                    <div className="formGrid" style={{ marginTop: 10 }}>
+                {jobsErr && <div className="error" style={{ marginTop: 10 }}>{jobsErr}</div>}
+
+                <div className="formGrid" style={{ marginTop: 10 }}>
                   <label>
                     Buscar (nombre, DNI, especialidad…)<br />
                     <input value={jobsQ} onChange={(e) => setJobsQ(e.target.value)} placeholder="Ej: soldador, 30123456" />
@@ -2911,8 +2881,21 @@ async function submitSocioForm() {
                   </label>
                   <label>
                     Localidad (opcional)<br />
-                    <input list="locs2" value={jobsLoc} onChange={(e) => setJobsLoc(e.target.value)} placeholder="Ej: Campana" />
-                    <datalist id="locs2">{LOCALIDADES.map((x) => <option key={x} value={x} />)}</datalist>
+                    <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                      <select value={jobsLoc} onChange={(e) => setJobsLoc(e.target.value)} style={{ flex: 1 }}>
+                        <option value="">(cualquiera)</option>
+                        {LOCALIDADES.map((x) => <option key={x} value={x}>{x}</option>)}
+                      </select>
+                      <button
+                        className="btnSecondary"
+                        type="button"
+                        onClick={() => setJobsLoc("")}
+                        title="Limpiar localidad"
+                        style={{ whiteSpace: "nowrap" }}
+                      >
+                        Limpiar
+                      </button>
+                    </div>
                   </label>
 
                   <label>
@@ -2986,11 +2969,34 @@ async function submitSocioForm() {
                       {INSTRUMENTOS_ELECTRICA.map((x) => <option key={x} value={x}>{x}</option>)}
                     </select>
                   </label>
-                    </div>
+                </div>
 
                 <div className="rowBetween" style={{ marginTop: 10 }}>
                   <div style={{ display: "flex", gap: 8 }}>
                     <button className="btnPrimary" disabled={jobsBusy} onClick={searchJobs}>{jobsBusy ? "Buscando…" : "Buscar"}</button>
+                    <button
+                      className="btnSecondary"
+                      disabled={jobsBusy}
+                      onClick={() => {
+                        setJobsQ("");
+                        setJobsArea("");
+                        setJobsLoc("");
+                        setJobsNivel("");
+                        setJobsEsp("");
+                        setJobsExp("");
+                        setJobsEdu("");
+                        setJobsCap("");
+                        setJobsTrab("");
+                        setJobsSoldCat("");
+                        setJobsHerr("");
+                        setJobsInstr("");
+                        setJobsItems([]);
+                        setJobsSelected(null);
+                      }}
+                      title="Resetea todos los filtros"
+                    >
+                      Limpiar filtros
+                    </button>
                     <button className="btnSecondary" disabled={jobsBusy} onClick={loadJobsStats}>Actualizar</button>
                   </div>
                   <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
@@ -3214,8 +3220,6 @@ async function submitSocioForm() {
                       </div>
                     </div>
                   </div>
-                )}
-              </>
                 )}
               </>
             )}
@@ -3839,6 +3843,7 @@ async function submitSocioForm() {
 
         
 {tab === "socios" && (
+  <main className="content">
     <section className="card">
       <div className="rowBetween">
         <div>
@@ -4295,6 +4300,7 @@ async function submitSocioForm() {
         </div>
       ) : null}
     </section>
+  </main>
 )}
 {tab === "ajustes" && (
           <section className="card">
