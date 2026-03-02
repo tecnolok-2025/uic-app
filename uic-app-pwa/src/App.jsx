@@ -3216,6 +3216,8 @@ async function submitSocioForm() {
                   </div>
                 )}
               </>
+                )}
+              </>
             )}
           </section>
         )}
@@ -3837,7 +3839,6 @@ async function submitSocioForm() {
 
         
 {tab === "socios" && (
-  <main className="content">
     <section className="card">
       <div className="rowBetween">
         <div>
@@ -4294,7 +4295,6 @@ async function submitSocioForm() {
         </div>
       ) : null}
     </section>
-  </main>
 )}
 {tab === "ajustes" && (
           <section className="card">
