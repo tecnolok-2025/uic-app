@@ -3,7 +3,7 @@ import "./index.css";
 import logoUIC from "./assets/logo-uic.jpeg";
 
 // Versión visible (footer / ajustes)
-const APP_VERSION = "0.34.6";
+const APP_VERSION = import.meta.env.VITE_APP_VERSION || "0.0.0";
 const BUILD_STAMP = (typeof __UIC_BUILD_STAMP__ !== "undefined") ? __UIC_BUILD_STAMP__ : "";
 const PWA_CACHE_ID = (typeof __UIC_CACHE_ID__ !== "undefined") ? __UIC_CACHE_ID__ : "";
 const PWA_COMMIT = (typeof __UIC_COMMIT__ !== "undefined") ? __UIC_COMMIT__ : "";

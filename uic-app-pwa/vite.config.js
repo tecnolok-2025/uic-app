@@ -1,6 +1,7 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import { VitePWA } from "vite-plugin-pwa";
+import pkg from "./package.json" assert { type: "json" };
 
 // v0.28.3: endurecemos el update de PWA para evitar "pantalla azul" por SW viejo
 // sirviendo index.html con assets que ya no existen (hash cambiado).
@@ -10,6 +11,7 @@ const COMMIT = process.env.RENDER_GIT_COMMIT || process.env.GITHUB_SHA || proces
 
 export default defineConfig({
   define: {
+    'import.meta.env.VITE_APP_VERSION': JSON.stringify(pkg.version),
     __UIC_BUILD_STAMP__: JSON.stringify(new Date().toISOString()),
     __UIC_CACHE_ID__: JSON.stringify(CACHE_ID),
     __UIC_COMMIT__: JSON.stringify(COMMIT),
