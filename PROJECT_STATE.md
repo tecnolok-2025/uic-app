@@ -1,6 +1,6 @@
 # UIC APP — Estado del proyecto (snapshot)
 
-**Release actual:** 0.34.7
+**Release actual:** 0.35.0
 
 ## Arquitectura
 - **PWA:** React + Vite + PWA (vite-plugin-pwa) — carpeta `uic-app-pwa/`
@@ -26,5 +26,5 @@
 
 ## Problemas históricos y fixes clave
 - Cache PWA/SW: puede dejar iPhone/Android desfasados → usar “Forzar actualización” y asegurar release correcto.
-- Bolsa de trabajo: localidad en mobile se “pegaba” cuando era datalist → en 0.34.7 se usa `<select>` + “Limpiar”.
-- Versiones múltiples en App.jsx/main.jsx → en 0.34.7 se centraliza en `src/version.js`.
+- Bolsa de trabajo: localidad en mobile se “pegaba” cuando era datalist → en 0.35.0 se usa `<select>` + “Limpiar”.
+- Versiones múltiples en App.jsx/main.jsx → en 0.35.0 se centraliza en `src/version.js`.
