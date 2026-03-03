@@ -31,14 +31,30 @@ a{color:inherit}
 }
 
 .brand{display:flex;flex-direction:column;align-items:center;justify-content:center}
-.brandLogoWrap{position:relative;display:flex;align-items:center;justify-content:center;padding:6px 10px;border-radius:16px}
+.brandLogoWrap{
+  position:relative;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  height:42px;
+  padding:0 6px;
+}
 .brandLogoWrap::before{content:"";position:absolute;inset:-14px;border-radius:22px;
   background:radial-gradient(circle at 50% 45%, rgba(63,164,255,0.38) 0%, rgba(10,76,139,0.20) 38%, transparent 72%);
   filter:blur(10px);z-index:0;pointer-events:none}
 .brandLogoWrap::after{content:"";position:absolute;inset:-2px;border-radius:18px;
   border:1px solid rgba(63,164,255,0.20);
   box-shadow:0 0 0 1px rgba(10,76,139,0.18) inset;z-index:0;pointer-events:none}
-.brandLogo{position:relative;z-index:1;filter:drop-shadow(0 0 8px rgba(63,164,255,0.45)) drop-shadow(0 0 18px rgba(63,164,255,0.22))}
+.brandLogo{
+  height:42px;
+  width:auto;
+  object-fit:contain;
+  position:relative;
+  z-index:1;
+  filter:
+    drop-shadow(0 0 4px rgba(63,164,255,0.35))
+    drop-shadow(0 0 10px rgba(63,164,255,0.25));
+}
 
 
 .topActions{position:absolute;right:16px;top:18px;display:flex;gap:10px;align-items:center}

@@ -1,4 +1,2 @@
-// Fuente única de verdad para la versión visible en la app.
-// Se toma desde uic-app-pwa/package.json
-import pkg from "../package.json";
-export const APP_VERSION = pkg.version;
+export const APP_VERSION="0.35.0"
+export const BUILD="2026-03-02"
