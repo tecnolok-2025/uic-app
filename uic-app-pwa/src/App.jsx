@@ -252,6 +252,7 @@ export default function App() {
     return new Date(n.getFullYear(), n.getMonth(), 1);
   });
   const [selectedDate, setSelectedDate] = useState(null);
+  const [editingEvent, setEditingEvent] = useState(null);
   const [agendaError, setAgendaError] = useState("");
   // Admin token:
   // Para evitar que quede "Admin: ACTIVO" persistente (y por seguridad), lo guardamos en sessionStorage.
@@ -1755,6 +1756,42 @@ async function createEvent(payload) {
   await loadAgendaForTwoMonths(agendaBase);
 }
 
+async function updateEvent(id, payload) {
+  if (!isAdmin || !canUseApi) return;
+
+  const r = await fetch(`${API_BASE}/events/${encodeURIComponent(id)}`, {
+    method: "PUT",
+    headers: {
+      "content-type": "application/json",
+      "x-admin-token": adminToken,
+    },
+    body: JSON.stringify(payload),
+  });
+
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(data?.error || `Error ${r.status}`);
+
+  setEventsMeta((m) => ({ ...m, updatedAt: data.updatedAt || m.updatedAt }));
+  await loadAgendaForTwoMonths(agendaBase);
+}
+
+async function deleteEvent(id) {
+  if (!isAdmin || !canUseApi) return;
+
+  const r = await fetch(`${API_BASE}/events/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+    headers: {
+      "x-admin-token": adminToken,
+    },
+  });
+
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(data?.error || `Error ${r.status}`);
+
+  setEventsMeta((m) => ({ ...m, updatedAt: data.updatedAt || m.updatedAt }));
+  await loadAgendaForTwoMonths(agendaBase);
+}
+
   const iso = (d) => localIsoDate(d);
 
   function getEventsForDate(dateStr) {
@@ -1866,6 +1903,82 @@ async function createEvent(payload) {
         >
           Salir admin
         </button>
+      </div>
+    );
+  }
+
+  function EventEditForm({ event, onSave, onDelete, onCancel }) {
+    const [date, setDate] = useState(event?.date || "");
+    const [title, setTitle] = useState(event?.title || "");
+    const [description, setDescription] = useState(event?.description || "");
+    const [highlight, setHighlight] = useState(!!event?.highlight);
+    const [saving, setSaving] = useState(false);
+
+    useEffect(() => {
+      setDate(event?.date || "");
+      setTitle(event?.title || "");
+      setDescription(event?.description || "");
+      setHighlight(!!event?.highlight);
+    }, [event]);
+
+    async function submit() {
+      try {
+        setSaving(true);
+        if (!String(title || "").trim() && !String(description || "").trim()) {
+          await onDelete();
+          alert("Evento eliminado.");
+          return;
+        }
+        await onSave({ date, title, description, highlight });
+        alert("Evento actualizado.");
+      } catch (e) {
+        alert(e?.message || "No se pudo actualizar el evento");
+      } finally {
+        setSaving(false);
+      }
+    }
+
+    async function removeEvent() {
+      const ok = window.confirm("¿Eliminar este evento de la agenda?");
+      if (!ok) return;
+      try {
+        setSaving(true);
+        await onDelete();
+        alert("Evento eliminado.");
+      } catch (e) {
+        alert(e?.message || "No se pudo eliminar el evento");
+      } finally {
+        setSaving(false);
+      }
+    }
+
+    return (
+      <div className="eventForm">
+        <div className="muted" style={{ marginBottom: 6 }}>Edición de evento</div>
+        <input className="input" type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+        <input className="input" placeholder="Título" value={title} onChange={(e) => setTitle(e.target.value)} />
+        <textarea
+          className="textarea"
+          placeholder="Descripción / temario"
+          value={description}
+          onChange={(e) => setDescription(e.target.value)}
+          rows={3}
+        />
+        <label className="row" style={{ gap: 8, alignItems: "center" }}>
+          <input type="checkbox" checked={highlight} onChange={(e) => setHighlight(e.target.checked)} />
+          <span>Resaltar (marca roja)</span>
+        </label>
+        <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
+          <button className="btnPrimary" disabled={saving || !String(title || "").trim()} onClick={submit}>
+            {saving ? "Guardando…" : "Guardar cambios"}
+          </button>
+          <button className="btnSecondary" type="button" disabled={saving} onClick={onCancel}>
+            Cancelar
+          </button>
+          <button className="btnSecondary" type="button" disabled={saving} onClick={removeEvent}>
+            Eliminar evento
+          </button>
+        </div>
       </div>
     );
   }
@@ -3395,7 +3508,7 @@ async function submitSocioForm() {
                         <b>{selectedDate}</b>
                         <div className="muted" style={{ fontSize: 12 }}>Eventos del día</div>
                       </div>
-                      <button className="btnSecondary" onClick={() => setSelectedDate(null)}>
+                      <button className="btnSecondary" onClick={() => { setSelectedDate(null); setEditingEvent(null); }}>
                         Cerrar
                       </button>
                     </div>
@@ -3407,8 +3520,22 @@ async function submitSocioForm() {
                         <div className="eventsList">
                           {getEventsForDate(selectedDate).map((ev) => (
                             <div key={ev.id} className={`eventItem ${ev.highlight ? "eventHighlight" : ""}`}>
-                              <div className="eventTitle">{ev.title}</div>
-                              {ev.description && <div className="eventDesc">{ev.description}</div>}
+                              <div className="rowBetween" style={{ gap: 8, alignItems: "flex-start" }}>
+                                <div style={{ flex: 1, minWidth: 0 }}>
+                                  <div className="eventTitle">{ev.title}</div>
+                                  {ev.description && <div className="eventDesc">{ev.description}</div>}
+                                </div>
+                                {isAdmin ? (
+                                  <button
+                                    className="btnSecondary"
+                                    type="button"
+                                    onClick={() => setEditingEvent(ev)}
+                                    style={{ whiteSpace: "nowrap" }}
+                                  >
+                                    Editar
+                                  </button>
+                                ) : null}
+                              </div>
                             </div>
                           ))}
                         </div>
@@ -3443,7 +3570,24 @@ async function submitSocioForm() {
                           </button>
                         </div>
                       ) : (
-                        <EventCreateForm date={selectedDate} onCreate={createEvent} />
+                        <>
+                          {editingEvent ? (
+                            <EventEditForm
+                              event={editingEvent}
+                              onSave={async (payload) => {
+                                await updateEvent(editingEvent.id, payload);
+                                setEditingEvent(null);
+                              }}
+                              onDelete={async () => {
+                                await deleteEvent(editingEvent.id);
+                                setEditingEvent(null);
+                              }}
+                              onCancel={() => setEditingEvent(null)}
+                            />
+                          ) : (
+                            <EventCreateForm date={selectedDate} onCreate={createEvent} />
+                          )}
+                        </>
                       )}
                     </div>
                   </div>
