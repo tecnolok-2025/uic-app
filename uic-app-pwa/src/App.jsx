@@ -35,7 +35,9 @@ function normalizePost(p) {
 }
 
 async function apiGet(path) {
-  const r = await fetch(`${API_BASE}${path}`);
+  const sep = path.includes("?") ? "&" : "?";
+  const url = `${API_BASE}${path}${sep}_ts=${Date.now()}`;
+  const r = await fetch(url, { cache: "no-store" });
   const data = await r.json().catch(() => ({}));
   if (!r.ok) {
     const msg = data?.message || data?.error || `HTTP ${r.status}`;
@@ -118,8 +120,9 @@ async function hardRefreshWithBadge(onStart) {
   } finally {
     // Cache-buster robusto (evita quedarse "pegado" en Actualizando...)
     const url = new URL(window.location.href);
-    exportUrl.searchParams.set("v", String(PWA_CACHE_ID || Date.now()));
-    exportUrl.searchParams.set("t", String(Date.now()));
+    url.searchParams.set("v", String(PWA_CACHE_ID || Date.now()));
+    url.searchParams.set("t", String(Date.now()));
+    try { sessionStorage.setItem("uic_force_reload_at", String(Date.now())); } catch (_) {}
     window.location.replace(url.toString());
   }
 }
@@ -1612,7 +1615,7 @@ useEffect(() => {
 
   useEffect(() => {
     if (tab !== "comunicacion") return;
-    loadComms(10);
+    loadComms(2000);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab]);
 
@@ -1692,12 +1695,12 @@ function endOfMonth(d) {
 }
 
 function agendaMinBase() {
-  return startOfMonth(new Date()); // mes actual
+  return addMonths(new Date(), -12);
 }
 
 function agendaMaxBase() {
-  // como se muestran 2 meses, el "base" máximo es mes actual + 10 (base+1 = +11 => 12 meses)
-  return addMonths(new Date(), 10);
+  // como se muestran 2 meses, el "base" máximo es mes actual + 11 (base+1 = +12)
+  return addMonths(new Date(), 11);
 }
 
 async function loadAgendaForTwoMonths(baseDate) {
@@ -1728,8 +1731,6 @@ async function loadAgendaForTwoMonths(baseDate) {
     const today = localIsoDate(new Date());
     setTodayEventsCount(items.filter((ev) => ev.date === today).length);
   } catch (e) {
-    setEvents([]);
-    setTodayEventsCount(0);
     setAgendaError(String(e?.message || e));
   }
 }
@@ -2072,7 +2073,7 @@ async function createEvent(payload) {
     }
     const j = await r.json();
     setCommsMeta((m) => ({ ...m, updatedAt: j.updatedAt || m.updatedAt }));
-    await loadComms(10);
+    await loadComms(2000);
     setCommsUnseen(0);
     if (j.updatedAt) markCommsSeen(j.updatedAt);
   }
@@ -4307,7 +4308,7 @@ async function submitSocioForm() {
             <div className="cardTitle">Ajustes</div>
             <div className="muted">
               <div>Versión: {APP_VERSION}</div><div style={{ marginTop: 12 }}>
-                <button className="btnPrimary" onClick={async () => { setRefreshing(true); try { await hardRefreshWithBadge(); } finally { setTimeout(() => setRefreshing(false), 8000); } }}>Forzar actualización</button></div>
+                <button className="btnPrimary" onClick={async () => { setRefreshing(true); try { await hardRefreshWithBadge(); } finally { setTimeout(() => setRefreshing(false), 8000); } }}>Forzar actualización (fuerte)</button></div>
 
               <div style={{ marginTop: 12 }}>
                 <button className="btnSecondary" onClick={async () => {

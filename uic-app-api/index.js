@@ -206,9 +206,8 @@ let JOBS_STORE = { items: [] };
 const DATABASE_URL = String(process.env.DATABASE_URL || process.env.POSTGRES_URL || process.env.PG_URL || "").trim();
 const DB_SSL = String(process.env.DATABASE_SSL || "true").trim().toLowerCase() !== "false";
 
-// Retención (ajustable por env). Por defecto: agenda ~ 400 días; comunicaciones: 50 últimas.
-const EVENTS_KEEP_DAYS = Math.max(parseInt(process.env.EVENTS_KEEP_DAYS || "400", 10) || 400, 30);
-const COMMS_KEEP = Math.min(Math.max(parseInt(process.env.COMMS_KEEP || "50", 10) || 50, 1), 200);
+// Retención (ajustable por env). Por defecto: agenda -12/+12 meses; comunicaciones: hasta 2000 últimas.
+const COMMS_KEEP = Math.min(Math.max(parseInt(process.env.COMMS_KEEP || "2000", 10) || 2000, 1), 2000);
 
 // Socios (directorio)
 const SOCIOS_KEEP = Math.min(Math.max(parseInt(process.env.SOCIOS_KEEP || "500", 10) || 500, 50), 5000);
@@ -683,7 +682,7 @@ async function pruneDb() {
   if (!dbReady) return;
 
   try {
-    // Agenda: mantener ventana móvil (mes actual -> +12 meses)
+    // Agenda: mantener ventana móvil (-12 meses -> +12 meses)
     await pool.query("DELETE FROM uic_events WHERE date < $1 OR date > $2", [w.start, w.end]);
 
     // Comms: mantener últimas COMMS_KEEP
@@ -875,10 +874,10 @@ function inRange(d, from, to) {
 
 
 function agendaWindowBounds() {
-  // Ventana móvil: mes actual -> +12 meses hacia adelante (incluye 12 meses: mes actual + 11)
+  // Ventana móvil: 12 meses hacia atrás + mes actual + 12 meses hacia adelante.
   const now = new Date();
-  const start = new Date(now.getFullYear(), now.getMonth(), 1);
-  const end = new Date(now.getFullYear(), now.getMonth() + 12, 0); // último día del mes (mes+11)
+  const start = new Date(now.getFullYear(), now.getMonth() - 12, 1);
+  const end = new Date(now.getFullYear(), now.getMonth() + 13, 0); // último día del mes actual+12
   const toIso = (d) => {
     const y = d.getFullYear();
     const m = String(d.getMonth() + 1).padStart(2, "0");
@@ -1428,7 +1427,7 @@ app.get("/comms/meta", async (req, res) => {
 });
 
 app.get("/comms", async (req, res) => {
-  const limit = Math.min(Math.max(parseInt(req.query.limit || "50", 10) || 50, 1), 200);
+  const limit = Math.min(Math.max(parseInt(req.query.limit || "50", 10) || 50, 1), 2000);
 
   try {
     if (dbReady) {
