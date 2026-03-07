@@ -755,3 +755,47 @@ a{color:inherit}
 .miniRow { display: flex; justify-content: space-between; gap: 10px; padding: 8px 10px; border-top: 1px solid rgba(255,255,255,0.06); font-size: 14px; }
 .miniRow:first-child { border-top: none; }
 .miniRow b { font-variant-numeric: tabular-nums; }
+
+/* Semáforo almacenamiento DB */
+.storageCard{
+  margin-top:14px;
+  padding:14px;
+  border-radius:18px;
+  background:linear-gradient(180deg, rgba(255,255,255,0.09), rgba(255,255,255,0.05));
+  border:1px solid rgba(255,255,255,0.10);
+  box-shadow:0 10px 28px rgba(0,0,0,0.14) inset;
+}
+.storageHeader{display:flex;gap:12px;align-items:flex-start;justify-content:space-between;flex-wrap:wrap}
+.storageTitle{font-weight:800;font-size:18px}
+.storageSub{margin-top:4px;color:var(--muted);font-size:12px;max-width:460px}
+.trafficWrap{margin-top:14px;display:flex;gap:18px;align-items:center;flex-wrap:wrap}
+.trafficLightShell{
+  width:92px;
+  padding:14px 12px;
+  border-radius:24px;
+  background:linear-gradient(180deg, #111c28 0%, #1d2b39 100%);
+  border:1px solid rgba(255,255,255,0.08);
+  box-shadow:0 18px 28px rgba(0,0,0,0.28), inset 0 1px 0 rgba(255,255,255,0.04);
+  display:flex;flex-direction:column;gap:12px;align-items:center;justify-content:center;
+}
+.trafficLamp{
+  width:44px;height:44px;border-radius:50%;opacity:.24;
+  box-shadow:inset 0 -8px 12px rgba(0,0,0,.28), inset 0 6px 8px rgba(255,255,255,.08), 0 2px 8px rgba(0,0,0,.22);
+  transition:all .2s ease;
+  border:1px solid rgba(255,255,255,0.10);
+}
+.trafficLamp.active{opacity:1;transform:scale(1.03)}
+.lampRed{background:radial-gradient(circle at 30% 30%, #ffb0b0 0%, #ff4a4a 35%, #a00000 100%)}
+.lampYellow{background:radial-gradient(circle at 30% 30%, #fff5b0 0%, #ffd84a 35%, #a86f00 100%)}
+.lampGreen{background:radial-gradient(circle at 30% 30%, #b8ffd0 0%, #3bd46a 35%, #0a7d2d 100%)}
+.lampRed.active{box-shadow:0 0 18px rgba(255,72,72,.65), inset 0 -8px 12px rgba(0,0,0,.20), inset 0 8px 10px rgba(255,255,255,.18)}
+.lampYellow.active{box-shadow:0 0 18px rgba(255,216,74,.62), inset 0 -8px 12px rgba(0,0,0,.20), inset 0 8px 10px rgba(255,255,255,.18)}
+.lampGreen.active{box-shadow:0 0 18px rgba(59,212,106,.60), inset 0 -8px 12px rgba(0,0,0,.20), inset 0 8px 10px rgba(255,255,255,.18)}
+.trafficInfo{flex:1;min-width:220px}
+.trafficPercent{font-size:28px;font-weight:800;line-height:1}
+.trafficState{margin-top:6px;color:var(--muted);font-size:14px}
+.trafficBar{margin-top:12px;height:12px;border-radius:999px;background:rgba(255,255,255,0.10);overflow:hidden;border:1px solid rgba(255,255,255,0.08)}
+.trafficBarFill{height:100%;border-radius:999px;background:linear-gradient(90deg, #28c76f 0%, #ffd84a 62%, #ff4a4a 100%);box-shadow:0 0 12px rgba(63,164,255,0.18)}
+.trafficLegend{margin-top:10px;display:flex;gap:10px;flex-wrap:wrap;color:var(--muted);font-size:12px}
+.trafficLegend span{padding:6px 8px;border-radius:999px;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.08)}
+.trafficUpdated,.trafficNote{margin-top:8px;color:var(--muted);font-size:12px}

@@ -208,6 +208,7 @@ const DB_SSL = String(process.env.DATABASE_SSL || "true").trim().toLowerCase() !
 
 // Retención (ajustable por env). Por defecto: agenda -12/+12 meses; comunicaciones: hasta 2000 últimas.
 const COMMS_KEEP = Math.min(Math.max(parseInt(process.env.COMMS_KEEP || "2000", 10) || 2000, 1), 2000);
+const STORAGE_CAPACITY_UNITS = Math.max(parseInt(process.env.STORAGE_CAPACITY_UNITS || "10000", 10) || 10000, 1000);
 
 // Socios (directorio)
 const SOCIOS_KEEP = Math.min(Math.max(parseInt(process.env.SOCIOS_KEEP || "500", 10) || 500, 50), 5000);
@@ -2048,6 +2049,51 @@ app.post("/member/reset-password", async (req, res) => {
 /* --------------------- Mensajes del socio endpoints --------------------- */
 
 // Meta (para badges)
+app.get("/system/storage-status", async (req, res) => {
+  try {
+    let agendaCount = 0;
+    let commsCount = 0;
+    let jobsCount = 0;
+
+    if (dbReady && pool) {
+      const [eventsR, commsR, jobsR] = await Promise.all([
+        pool.query("SELECT COUNT(*)::int AS count FROM uic_events"),
+        pool.query("SELECT COUNT(*)::int AS count FROM uic_comms"),
+        pool.query("SELECT COUNT(*)::int AS count FROM uic_job_candidates"),
+      ]);
+      agendaCount = Number(eventsR.rows?.[0]?.count || 0);
+      commsCount = Number(commsR.rows?.[0]?.count || 0);
+      jobsCount = Number(jobsR.rows?.[0]?.count || 0);
+    } else {
+      agendaCount = Array.isArray(EVENTS_STORE?.events) ? EVENTS_STORE.events.length : 0;
+      commsCount = Array.isArray(COMMS_STORE?.items) ? COMMS_STORE.items.length : 0;
+      jobsCount = Array.isArray(JOBS_STORE?.items) ? JOBS_STORE.items.length : 0;
+    }
+
+    const weightedTotal = agendaCount + commsCount + (jobsCount * 3);
+    const percent = Math.max(0, Math.min(100, Math.round((weightedTotal / STORAGE_CAPACITY_UNITS) * 100)));
+    const status = percent <= 60 ? "verde" : percent <= 85 ? "amarillo" : "rojo";
+
+    return res.json({
+      ok: true,
+      status,
+      percent,
+      capacityUnits: STORAGE_CAPACITY_UNITS,
+      usedUnits: weightedTotal,
+      details: {
+        agenda: agendaCount,
+        comunicaciones: commsCount,
+        cvs: jobsCount,
+      },
+      updatedAt: new Date().toISOString(),
+      note: "Estimación orientativa del uso de almacenamiento DB.",
+    });
+  } catch (e) {
+    console.log("⚠️ DB storage-status error:", e?.message || e);
+    return res.status(500).json({ error: "No se pudo calcular el estado del almacenamiento." });
+  }
+});
+
 app.get("/messages/meta", async (req, res) => {
   const adminTok = (req.header("x-admin-token") || "").trim();
   const memberTok = (req.header("x-member-token") || "").trim();

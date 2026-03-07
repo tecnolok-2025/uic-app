@@ -46,6 +46,31 @@ async function apiGet(path) {
   return data;
 }
 
+async function loadStorageStatusSafe(setter, setBusy, setError) {
+  setBusy?.(true);
+  setError?.("");
+  try {
+    const data = await apiGet("/system/storage-status");
+    setter?.({
+      percent: Number.isFinite(Number(data?.percent)) ? Number(data.percent) : 0,
+      status: String(data?.status || "verde"),
+      details: data?.details || { agenda: 0, comunicaciones: 0, cvs: 0 },
+      updatedAt: data?.updatedAt || null,
+      note: data?.note || "",
+    });
+  } catch (e) {
+    setError?.(String(e?.message || e));
+  } finally {
+    setBusy?.(false);
+  }
+}
+
+function storageStatusLabel(status, percent) {
+  if (status === "rojo") return `Rojo · uso alto (${percent ?? 0}%)`;
+  if (status === "amarillo") return `Amarillo · observar (${percent ?? 0}%)`;
+  return `Verde · uso bajo (${percent ?? 0}%)`;
+}
+
 async function trySetIconBadge(n) {
   try {
     if (typeof navigator?.setAppBadge === "function") {
@@ -241,6 +266,15 @@ export default function App() {
 
   const [categories, setCategories] = useState([]);
   const [apiStatus, setApiStatus] = useState({ ok: false });
+  const [storageStatus, setStorageStatus] = useState({
+    percent: null,
+    status: "verde",
+    details: { agenda: 0, comunicaciones: 0, cvs: 0 },
+    updatedAt: null,
+    note: "",
+  });
+  const [storageBusy, setStorageBusy] = useState(false);
+  const [storageError, setStorageError] = useState("");
 
   // Agenda
   const [events, setEvents] = useState([]);
@@ -284,6 +318,12 @@ export default function App() {
       }
     })();
   }, [adminToken]);
+
+  useEffect(() => {
+    if (tab !== "ajustes") return;
+    loadStorageStatusSafe(setStorageStatus, setStorageBusy, setStorageError);
+  }, [tab]);
+
 
 
   // Comunicación al socio
@@ -4451,7 +4491,45 @@ async function submitSocioForm() {
           <section className="card">
             <div className="cardTitle">Ajustes</div>
             <div className="muted">
-              <div>Versión: {APP_VERSION}</div><div style={{ marginTop: 12 }}>
+              <div>Versión: {APP_VERSION}</div>
+
+              <div className="storageCard" style={{ marginTop: 14 }}>
+                <div className="storageHeader">
+                  <div>
+                    <div className="storageTitle">Semáforo de almacenamiento DB</div>
+                    <div className="storageSub">Indicador orientativo del uso del almacenamiento persistente.</div>
+                  </div>
+                  <button className="btnSecondary" onClick={() => loadStorageStatusSafe(setStorageStatus, setStorageBusy, setStorageError)} disabled={storageBusy}>
+                    {storageBusy ? "Actualizando…" : "Actualizar semáforo"}
+                  </button>
+                </div>
+
+                <div className="trafficWrap">
+                  <div className="trafficLightShell" aria-label="Semáforo de almacenamiento">
+                    <div className={cls("trafficLamp", "lampRed", storageStatus.status === "rojo" && "active")} />
+                    <div className={cls("trafficLamp", "lampYellow", storageStatus.status === "amarillo" && "active")} />
+                    <div className={cls("trafficLamp", "lampGreen", storageStatus.status === "verde" && "active")} />
+                  </div>
+
+                  <div className="trafficInfo">
+                    <div className="trafficPercent">{storageStatus.percent ?? 0}% usado</div>
+                    <div className="trafficState">{storageStatusLabel(storageStatus.status, storageStatus.percent)}</div>
+                    <div className="trafficBar">
+                      <div className="trafficBarFill" style={{ width: `${Math.max(0, Math.min(100, storageStatus.percent ?? 0))}%` }} />
+                    </div>
+                    <div className="trafficLegend">
+                      <span>Agenda: {storageStatus.details?.agenda ?? 0}</span>
+                      <span>Comunicación: {storageStatus.details?.comunicaciones ?? 0}</span>
+                      <span>CV: {storageStatus.details?.cvs ?? 0}</span>
+                    </div>
+                    {storageStatus.updatedAt ? <div className="trafficUpdated">Actualizado: {new Date(storageStatus.updatedAt).toLocaleString()}</div> : null}
+                    {storageStatus.note ? <div className="trafficNote">{storageStatus.note}</div> : null}
+                    {storageError ? <div className="alert" style={{ marginTop: 8 }}>{storageError}</div> : null}
+                  </div>
+                </div>
+              </div>
+
+              <div style={{ marginTop: 12 }}>
                 <button className="btnPrimary" onClick={async () => { setRefreshing(true); try { await hardRefreshWithBadge(); } finally { setTimeout(() => setRefreshing(false), 8000); } }}>Forzar actualización (fuerte)</button></div>
 
               <div style={{ marginTop: 12 }}>
