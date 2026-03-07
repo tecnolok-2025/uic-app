@@ -207,6 +207,7 @@ const DATABASE_URL = String(process.env.DATABASE_URL || process.env.POSTGRES_URL
 const DB_SSL = String(process.env.DATABASE_SSL || "true").trim().toLowerCase() !== "false";
 
 // Retención (ajustable por env). Por defecto: agenda -12/+12 meses; comunicaciones: hasta 2000 últimas.
+const JOBS_MAX_ACTIVE = Number(process.env.JOBS_MAX_ACTIVE || 2000);
 const COMMS_KEEP = Math.min(Math.max(parseInt(process.env.COMMS_KEEP || "2000", 10) || 2000, 1), 2000);
 const STORAGE_CAPACITY_UNITS = Math.max(parseInt(process.env.STORAGE_CAPACITY_UNITS || "10000", 10) || 10000, 1000);
 
@@ -2254,6 +2255,24 @@ function _sanitizeText(s, maxLen) {
   return t.length > maxLen ? t.slice(0, maxLen) : t;
 }
 
+function _registeredSinceDate(period) {
+  const p = String(period || "").trim().toLowerCase();
+  if (!p) return null;
+  const now = new Date();
+  const d = new Date(now);
+  if (p === "7d") d.setDate(d.getDate() - 7);
+  else if (p === "30d" || p === "1m") d.setDate(d.getDate() - 30);
+  else if (p === "90d" || p === "3m") d.setDate(d.getDate() - 90);
+  else if (p === "365d" || p === "12m" || p === "1y") d.setDate(d.getDate() - 365);
+  else return null;
+  return d;
+}
+
+function _createdAtMs(it) {
+  const v = it?.created_at ? Date.parse(it.created_at) : NaN;
+  return Number.isFinite(v) ? v : 0;
+}
+
 // Alta pública de candidato (sin clave)
 app.post("/jobs/candidates", async (req, res) => {
   try {
@@ -2338,6 +2357,12 @@ app.post("/jobs/candidates", async (req, res) => {
         herramientas_mecanica,
         instrumentos_electrica,
       });
+      if (JOBS_STORE.items.length > JOBS_MAX_ACTIVE) {
+        JOBS_STORE.items = JOBS_STORE.items
+          .slice()
+          .sort((a, b) => _createdAtMs(b) - _createdAtMs(a))
+          .slice(0, JOBS_MAX_ACTIVE);
+      }
       return res.json({ ok: true, id });
     }
 
@@ -2386,6 +2411,17 @@ app.post("/jobs/candidates", async (req, res) => {
         JSON.stringify(instrumentos_electrica || []),
       ]
     );
+
+    await pool.query(
+      `DELETE FROM uic_job_candidates
+        WHERE id IN (
+          SELECT id FROM uic_job_candidates
+          ORDER BY created_at DESC, id DESC
+          OFFSET $1
+        )`,
+      [JOBS_MAX_ACTIVE]
+    );
+
     return res.json({ ok: true, id });
   } catch (e) {
     console.log("⚠️ jobs/candidates error:", e?.message || e);
@@ -2429,6 +2465,9 @@ app.get("/jobs/search", requireAccess, async (req, res) => {
     const soldador_categoria = String(req.query?.soldador_categoria || "").trim();
     const herramienta = String(req.query?.herramienta || "").trim();
     const instrumento = String(req.query?.instrumento || "").trim();
+    const fecha_registro = String(req.query?.fecha_registro || "").trim();
+    const orden = String(req.query?.orden || "recientes").trim().toLowerCase();
+    const registeredSince = _registeredSinceDate(fecha_registro);
 
     const _norm = (s) => String(s || "").trim().toLowerCase();
 
@@ -2461,19 +2500,28 @@ app.get("/jobs/search", requireAccess, async (req, res) => {
         const esp = it.especialidad === "Otros" ? (it.especialidad_otro || "Otros") : (it.especialidad || "");
         if (String(esp) !== especialidad) return false;
       }
+      if (registeredSince) {
+        const ms = _createdAtMs(it);
+        if (!ms || ms < registeredSince.getTime()) return false;
+      }
       if (!q) return true;
       const hay = `${it.nombre || ""} ${it.apellido || ""} ${it.dni || ""} ${it.localidad || ""} ${it.area_trabajo || ""} ${it.especialidad || ""} ${it.especialidad_otro || ""}`.toLowerCase();
       return hay.includes(q);
     };
 
+    const sortFn = (a, b) => {
+      const diff = _createdAtMs(b) - _createdAtMs(a);
+      return orden === "antiguos" ? -diff : diff;
+    };
+
     if (!dbReady) {
-      const items = (JOBS_STORE?.items || []).filter(filterFn).slice(0, 200);
+      const items = (JOBS_STORE?.items || []).filter(filterFn).slice().sort(sortFn).slice(0, 200);
       return res.json({ ok: true, items });
     }
 
     // DB: traemos todo y filtramos en memoria (simple; optimizable luego)
     const r = await pool.query("SELECT * FROM uic_job_candidates ORDER BY created_at DESC");
-    const items = (r.rows || []).filter(filterFn).slice(0, 200);
+    const items = (r.rows || []).filter(filterFn).slice().sort(sortFn).slice(0, 200);
     return res.json({ ok: true, items });
   } catch (e) {
     console.log("⚠️ jobs/search error:", e?.message || e);
@@ -2504,10 +2552,18 @@ app.get("/jobs/export", requireAdmin, async (req, res) => {
     const soldador_categoria = String(req.query?.soldador_categoria || "").trim();
     const herramienta = String(req.query?.herramienta || "").trim();
     const instrumento = String(req.query?.instrumento || "").trim();
+    const fecha_registro = String(req.query?.fecha_registro || "").trim();
+    const orden = String(req.query?.orden || "recientes").trim().toLowerCase();
+    const registeredSince = _registeredSinceDate(fecha_registro);
 
+    const _norm = (s) => String(s || "").trim().toLowerCase();
     const filterFn = (it) => {
       if (area && String(it.area_trabajo || "") !== area) return false;
-      if (localidad && String(it.localidad || "") !== localidad) return false;
+      if (localidad) {
+        const a = _norm(it.localidad);
+        const b = _norm(localidad);
+        if (!(a === b || a.startsWith(b))) return false;
+      }
       if (nivel && String(it.nivel || "") !== nivel) return false;
       if (rango_experiencia && String(it.rango_experiencia || "") !== rango_experiencia) return false;
       if (nivel_educativo && String(it.nivel_educativo || "") !== nivel_educativo) return false;
@@ -2528,12 +2584,19 @@ app.get("/jobs/export", requireAdmin, async (req, res) => {
         const esp = it.especialidad === "Otros" ? (it.especialidad_otro || "Otros") : (it.especialidad || "");
         if (String(esp) !== especialidad) return false;
       }
+      if (registeredSince) {
+        const ms = _createdAtMs(it);
+        if (!ms || ms < registeredSince.getTime()) return false;
+      }
       if (!q) return true;
       const hay = `${it.nombre || ""} ${it.apellido || ""} ${it.dni || ""} ${it.localidad || ""} ${it.area_trabajo || ""} ${it.especialidad || ""} ${it.especialidad_otro || ""}`.toLowerCase();
       return hay.includes(q);
     };
     if (q || area || localidad || nivel || especialidad || rango_experiencia || nivel_educativo || tiene_capacitacion || trabaja_actualmente || soldador_categoria || herramienta || instrumento) {
-      items = items.filter(filterFn);
+      items = items.filter(filterFn).slice().sort((a, b) => {
+      const diff = _createdAtMs(b) - _createdAtMs(a);
+      return orden === "antiguos" ? -diff : diff;
+    });
     }
 
     const headers = [

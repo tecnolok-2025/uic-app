@@ -463,6 +463,8 @@ const [jobsTrab, setJobsTrab] = useState(""); // SI/NO
 const [jobsSoldCat, setJobsSoldCat] = useState("");
 const [jobsHerr, setJobsHerr] = useState("");
 const [jobsInstr, setJobsInstr] = useState("");
+const [jobsFechaReg, setJobsFechaReg] = useState("");
+const [jobsOrden, setJobsOrden] = useState("recientes");
 const [jobsTabArea, setJobsTabArea] = useState("");
 const [jobsItems, setJobsItems] = useState([]);
 const [jobsErr, setJobsErr] = useState("");
@@ -690,6 +692,7 @@ const sortedFacetEntries = (facet) => {
   return Object.entries(obj).sort((a, b) => (b[1] || 0) - (a[1] || 0));
 };
 
+
 const loadJobsStats = async () => {
   if (!API_BASE) { setJobsErr("No hay conexión con la API."); return; }
   if (!adminToken && !memberToken) { setJobsErr("Ingresá como socio o administrador para buscar CV."); return; }
@@ -726,6 +729,8 @@ const searchJobs = async () => {
     if (jobsSoldCat) url.searchParams.set("soldador_categoria", jobsSoldCat);
     if (jobsHerr) url.searchParams.set("herramienta", jobsHerr);
     if (jobsInstr) url.searchParams.set("instrumento", jobsInstr);
+    if (jobsFechaReg) url.searchParams.set("fecha_registro", jobsFechaReg);
+    if (jobsOrden) url.searchParams.set("orden", jobsOrden);
     const r = await fetch(url.toString(), { headers: jobsAuthHeaders() });
     const j = await r.json().catch(() => ({}));
     if (!r.ok) throw new Error(j?.error || "Error al buscar");
@@ -756,6 +761,8 @@ const exportJobsXlsx = async (filtered = false) => {
       if (jobsSoldCat) exportUrl.searchParams.set("soldador_categoria", jobsSoldCat);
       if (jobsHerr) exportUrl.searchParams.set("herramienta", jobsHerr);
       if (jobsInstr) exportUrl.searchParams.set("instrumento", jobsInstr);
+      if (jobsFechaReg) exportUrl.searchParams.set("fecha_registro", jobsFechaReg);
+      if (jobsOrden) exportUrl.searchParams.set("orden", jobsOrden);
     }
 
     const r = await fetch(exportUrl.toString(), { headers: { "x-admin-token": adminToken } });
@@ -3123,6 +3130,25 @@ async function submitSocioForm() {
                       {INSTRUMENTOS_ELECTRICA.map((x) => <option key={x} value={x}>{x}</option>)}
                     </select>
                   </label>
+
+                  <label>
+                    Fecha de registro (opcional)<br />
+                    <select value={jobsFechaReg} onChange={(e) => setJobsFechaReg(e.target.value)}>
+                      <option value="">Todas</option>
+                      <option value="7d">Últimos 7 días</option>
+                      <option value="30d">Último mes</option>
+                      <option value="90d">Últimos 3 meses</option>
+                      <option value="365d">Último año</option>
+                    </select>
+                  </label>
+
+                  <label>
+                    Ordenar por<br />
+                    <select value={jobsOrden} onChange={(e) => setJobsOrden(e.target.value)}>
+                      <option value="recientes">Más recientes</option>
+                      <option value="antiguos">Más antiguos</option>
+                    </select>
+                  </label>
                 </div>
 
                 <div className="rowBetween" style={{ marginTop: 10 }}>
@@ -3144,6 +3170,8 @@ async function submitSocioForm() {
                         setJobsSoldCat("");
                         setJobsHerr("");
                         setJobsInstr("");
+                        setJobsFechaReg("");
+                        setJobsOrden("recientes");
                         setJobsItems([]);
                         setJobsSelected(null);
                       }}
@@ -3334,6 +3362,7 @@ async function submitSocioForm() {
                       <div key={it.id} className="postRow" role="button" onClick={() => setJobsSelected(it)}>
                         <div className="postRowTitle">{it.apellido}, {it.nombre} — {it.area_trabajo}</div>
                         <div className="postRowExcerpt">{it.localidad} • {it.especialidad === "Otros" ? (it.especialidad_otro || "Otros") : it.especialidad} • Exp: {it.rango_experiencia}</div>
+                        <div className="muted" style={{ marginTop: 4, fontSize: 12 }}>Registrado: {formatDateTime(it.created_at) || "s/d"}</div>
                       </div>
                     ))}
                   </div>
@@ -3368,6 +3397,7 @@ async function submitSocioForm() {
                         )}
                         <div><b>Experiencia:</b> {jobsSelected.rango_experiencia} • <b>Educación:</b> {jobsSelected.nivel_educativo}</div>
                         <div><b>Capacitación:</b> {jobsSelected.tiene_capacitacion ? "Sí" : "No"} • <b>Trabaja:</b> {jobsSelected.trabaja_actualmente ? "Sí" : "No"}</div>
+                        <div><b>Fecha de registro:</b> {formatDateTime(jobsSelected.created_at) || "s/d"}</div>
                         {jobsSelected.sueldo_pretendido && <div><b>Sueldo:</b> {jobsSelected.sueldo_pretendido}</div>}
                         {jobsSelected.ultimo_trabajo && <div><b>Último trabajo:</b> {jobsSelected.ultimo_trabajo}</div>}
                         {jobsSelected.observaciones && <div style={{ marginTop: 6 }}><b>Obs:</b> {jobsSelected.observaciones}</div>}
