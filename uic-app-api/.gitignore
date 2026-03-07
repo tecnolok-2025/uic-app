@@ -1,2 +1,14 @@
-node_modules
+# Secrets / env
 .env
+.env.*
+!.env.example
+
+# Runtime state (MVP JSON stores)
+state.json
+/data/
+
+# Node
+node_modules/
+
+# Logs
+*.log
