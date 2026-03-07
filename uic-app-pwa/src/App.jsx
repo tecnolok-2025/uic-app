@@ -729,7 +729,7 @@ const searchJobs = async () => {
     if (jobsSoldCat) url.searchParams.set("soldador_categoria", jobsSoldCat);
     if (jobsHerr) url.searchParams.set("herramienta", jobsHerr);
     if (jobsInstr) url.searchParams.set("instrumento", jobsInstr);
-    if (jobsFechaReg) url.searchParams.set("fecha_registro", jobsFechaReg);
+    if (jobsFechaReg) url.searchParams.set("ultima_actualizacion", jobsFechaReg);
     if (jobsOrden) url.searchParams.set("orden", jobsOrden);
     const r = await fetch(url.toString(), { headers: jobsAuthHeaders() });
     const j = await r.json().catch(() => ({}));
@@ -761,7 +761,7 @@ const exportJobsXlsx = async (filtered = false) => {
       if (jobsSoldCat) exportUrl.searchParams.set("soldador_categoria", jobsSoldCat);
       if (jobsHerr) exportUrl.searchParams.set("herramienta", jobsHerr);
       if (jobsInstr) exportUrl.searchParams.set("instrumento", jobsInstr);
-      if (jobsFechaReg) exportUrl.searchParams.set("fecha_registro", jobsFechaReg);
+      if (jobsFechaReg) exportUrl.searchParams.set("ultima_actualizacion", jobsFechaReg);
       if (jobsOrden) exportUrl.searchParams.set("orden", jobsOrden);
     }
 
@@ -3132,7 +3132,7 @@ async function submitSocioForm() {
                   </label>
 
                   <label>
-                    Fecha de registro (opcional)<br />
+                    Última actualización (opcional)<br />
                     <select value={jobsFechaReg} onChange={(e) => setJobsFechaReg(e.target.value)}>
                       <option value="">Todas</option>
                       <option value="7d">Últimos 7 días</option>
@@ -3397,7 +3397,7 @@ async function submitSocioForm() {
                         )}
                         <div><b>Experiencia:</b> {jobsSelected.rango_experiencia} • <b>Educación:</b> {jobsSelected.nivel_educativo}</div>
                         <div><b>Capacitación:</b> {jobsSelected.tiene_capacitacion ? "Sí" : "No"} • <b>Trabaja:</b> {jobsSelected.trabaja_actualmente ? "Sí" : "No"}</div>
-                        <div><b>Fecha de registro:</b> {formatDateTime(jobsSelected.created_at) || "s/d"}</div>
+                        <div><b>Última actualización:</b> {formatDateTime(jobsSelected.updated_at || jobsSelected.created_at) || "s/d"}</div>
                         {jobsSelected.sueldo_pretendido && <div><b>Sueldo:</b> {jobsSelected.sueldo_pretendido}</div>}
                         {jobsSelected.ultimo_trabajo && <div><b>Último trabajo:</b> {jobsSelected.ultimo_trabajo}</div>}
                         {jobsSelected.observaciones && <div style={{ marginTop: 6 }}><b>Obs:</b> {jobsSelected.observaciones}</div>}

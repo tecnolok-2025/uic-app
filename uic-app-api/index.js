@@ -563,6 +563,7 @@ async function initDb() {
     try { await pool.query("ALTER TABLE uic_job_candidates ADD COLUMN IF NOT EXISTS soldador_categoria TEXT DEFAULT ''"); } catch (e) {}
 
     await pool.query(`CREATE INDEX IF NOT EXISTS uic_job_candidates_created_idx ON uic_job_candidates(created_at DESC)`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS uic_job_candidates_updated_idx ON uic_job_candidates(updated_at DESC)`);
     await pool.query(`CREATE INDEX IF NOT EXISTS uic_job_candidates_area_idx ON uic_job_candidates(area_trabajo)`);
     await pool.query(`CREATE INDEX IF NOT EXISTS uic_job_candidates_localidad_idx ON uic_job_candidates(localidad)`);
 
@@ -2268,8 +2269,9 @@ function _registeredSinceDate(period) {
   return d;
 }
 
-function _createdAtMs(it) {
-  const v = it?.created_at ? Date.parse(it.created_at) : NaN;
+function _candidateFreshMs(it) {
+  const raw = it?.updated_at || it?.created_at;
+  const v = raw ? Date.parse(raw) : NaN;
   return Number.isFinite(v) ? v : 0;
 }
 
@@ -2360,7 +2362,7 @@ app.post("/jobs/candidates", async (req, res) => {
       if (JOBS_STORE.items.length > JOBS_MAX_ACTIVE) {
         JOBS_STORE.items = JOBS_STORE.items
           .slice()
-          .sort((a, b) => _createdAtMs(b) - _createdAtMs(a))
+          .sort((a, b) => _candidateFreshMs(b) - _candidateFreshMs(a))
           .slice(0, JOBS_MAX_ACTIVE);
       }
       return res.json({ ok: true, id });
@@ -2416,7 +2418,7 @@ app.post("/jobs/candidates", async (req, res) => {
       `DELETE FROM uic_job_candidates
         WHERE id IN (
           SELECT id FROM uic_job_candidates
-          ORDER BY created_at DESC, id DESC
+          ORDER BY updated_at DESC, created_at DESC, id DESC
           OFFSET $1
         )`,
       [JOBS_MAX_ACTIVE]
@@ -2465,9 +2467,9 @@ app.get("/jobs/search", requireAccess, async (req, res) => {
     const soldador_categoria = String(req.query?.soldador_categoria || "").trim();
     const herramienta = String(req.query?.herramienta || "").trim();
     const instrumento = String(req.query?.instrumento || "").trim();
-    const fecha_registro = String(req.query?.fecha_registro || "").trim();
+    const ultima_actualizacion = String(req.query?.ultima_actualizacion || req.query?.fecha_registro || "").trim();
     const orden = String(req.query?.orden || "recientes").trim().toLowerCase();
-    const registeredSince = _registeredSinceDate(fecha_registro);
+    const registeredSince = _registeredSinceDate(ultima_actualizacion);
 
     const _norm = (s) => String(s || "").trim().toLowerCase();
 
@@ -2501,7 +2503,7 @@ app.get("/jobs/search", requireAccess, async (req, res) => {
         if (String(esp) !== especialidad) return false;
       }
       if (registeredSince) {
-        const ms = _createdAtMs(it);
+        const ms = _candidateFreshMs(it);
         if (!ms || ms < registeredSince.getTime()) return false;
       }
       if (!q) return true;
@@ -2510,7 +2512,7 @@ app.get("/jobs/search", requireAccess, async (req, res) => {
     };
 
     const sortFn = (a, b) => {
-      const diff = _createdAtMs(b) - _createdAtMs(a);
+      const diff = _candidateFreshMs(b) - _candidateFreshMs(a);
       return orden === "antiguos" ? -diff : diff;
     };
 
@@ -2520,7 +2522,7 @@ app.get("/jobs/search", requireAccess, async (req, res) => {
     }
 
     // DB: traemos todo y filtramos en memoria (simple; optimizable luego)
-    const r = await pool.query("SELECT * FROM uic_job_candidates ORDER BY created_at DESC");
+    const r = await pool.query("SELECT * FROM uic_job_candidates ORDER BY updated_at DESC, created_at DESC");
     const items = (r.rows || []).filter(filterFn).slice().sort(sortFn).slice(0, 200);
     return res.json({ ok: true, items });
   } catch (e) {
@@ -2535,7 +2537,7 @@ app.get("/jobs/export", requireAdmin, async (req, res) => {
     let items = [];
     if (!dbReady) items = (JOBS_STORE?.items || []);
     else {
-      const r = await pool.query("SELECT * FROM uic_job_candidates ORDER BY created_at DESC");
+      const r = await pool.query("SELECT * FROM uic_job_candidates ORDER BY updated_at DESC, created_at DESC");
       items = r.rows || [];
     }
 
@@ -2552,9 +2554,9 @@ app.get("/jobs/export", requireAdmin, async (req, res) => {
     const soldador_categoria = String(req.query?.soldador_categoria || "").trim();
     const herramienta = String(req.query?.herramienta || "").trim();
     const instrumento = String(req.query?.instrumento || "").trim();
-    const fecha_registro = String(req.query?.fecha_registro || "").trim();
+    const ultima_actualizacion = String(req.query?.ultima_actualizacion || req.query?.fecha_registro || "").trim();
     const orden = String(req.query?.orden || "recientes").trim().toLowerCase();
-    const registeredSince = _registeredSinceDate(fecha_registro);
+    const registeredSince = _registeredSinceDate(ultima_actualizacion);
 
     const _norm = (s) => String(s || "").trim().toLowerCase();
     const filterFn = (it) => {
@@ -2585,7 +2587,7 @@ app.get("/jobs/export", requireAdmin, async (req, res) => {
         if (String(esp) !== especialidad) return false;
       }
       if (registeredSince) {
-        const ms = _createdAtMs(it);
+        const ms = _candidateFreshMs(it);
         if (!ms || ms < registeredSince.getTime()) return false;
       }
       if (!q) return true;
@@ -2594,12 +2596,13 @@ app.get("/jobs/export", requireAdmin, async (req, res) => {
     };
     if (q || area || localidad || nivel || especialidad || rango_experiencia || nivel_educativo || tiene_capacitacion || trabaja_actualmente || soldador_categoria || herramienta || instrumento) {
       items = items.filter(filterFn).slice().sort((a, b) => {
-      const diff = _createdAtMs(b) - _createdAtMs(a);
+      const diff = _candidateFreshMs(b) - _candidateFreshMs(a);
       return orden === "antiguos" ? -diff : diff;
     });
     }
 
     const headers = [
+      "updated_at",
       "created_at",
       "nombre",
       "apellido",
