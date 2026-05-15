@@ -1,6 +1,6 @@
 # UIC APP — Estado del proyecto (snapshot)
 
-**Release actual:** 0.35.0
+**Release actual:** 0.36.0
 
 ## Arquitectura
 - **PWA:** React + Vite + PWA (vite-plugin-pwa) — carpeta `uic-app-pwa/`
@@ -20,11 +20,12 @@
 
 ## Módulos principales
 - Inicio / Publicaciones (WordPress feed)
-- Pro.Industrial (Bolsa de trabajo: alta CV + búsqueda + export admin)
+- Pro.Industrial
 - Manual (PDF)
 - Ajustes (admin token, forzar actualización, etc.)
 
 ## Problemas históricos y fixes clave
 - Cache PWA/SW: puede dejar iPhone/Android desfasados → usar “Forzar actualización” y asegurar release correcto.
 - Bolsa de trabajo: localidad en mobile se “pegaba” cuando era datalist → en 0.35.0 se usa `<select>` + “Limpiar”.
+- Accesos rápidos: en 0.36.0 se oculta “Bolsa de trabajo” y se reemplaza por “Talento PyME” con link externo e ícono.
 - Versiones múltiples en App.jsx/main.jsx → en 0.35.0 se centraliza en `src/version.js`.

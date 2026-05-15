@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import "./index.css";
 import { APP_VERSION } from "./version";
 import logoUIC from "./assets/logo-uic.jpeg";
+import talentoPymeIcon from "./assets/talento-pyme.png";
 
 // Versión visible (footer / ajustes)
 const BUILD_STAMP = (typeof __UIC_BUILD_STAMP__ !== "undefined") ? __UIC_BUILD_STAMP__ : "";
@@ -1678,8 +1679,8 @@ useEffect(() => {
 const quickLinks = [
   { key: "hacete_socio", label: "Hacete socio", href: "https://uic-campana.com.ar/hacete-socio/" },
 
-  // v0.31: “Promoción Industrial” (arriba) pasa a ser “Bolsa de trabajo”
-  { key: "bolsa_trabajo", label: "Bolsa de trabajo", href: "#", onClick: () => setTab("bolsa") },
+  // v0.36.0: “Bolsa de trabajo” queda oculto y se reemplaza por acceso directo a Talento PyME.
+  { key: "talento_pyme", label: "Talento PyME", href: "https://talento-pyme.onrender.com/", icon: talentoPymeIcon },
 
   { key: "beneficios", label: "Beneficios", href: "#", onClick: () => setTab("beneficios") },
   { key: "agenda", label: "Agenda", href: "#", onClick: () => setTab("agenda") },
@@ -2554,13 +2555,14 @@ async function submitSocioForm() {
                     <button
                       key={x.key}
                       type="button"
-                      className={cls("quickTile", x.disabled && "quickTileDisabled")}
+                      className={cls("quickTile", x.icon && "quickTileWithIcon", x.disabled && "quickTileDisabled")}
                       aria-disabled={x.disabled ? "true" : "false"}
                       onClick={() => {
                         if (x.disabled) return;
                         x.onClick?.();
                       }}
                     >
+                      {x.icon ? <img className="quickTileIcon" src={x.icon} alt="" aria-hidden="true" /> : null}
                       <span>{x.label}</span>
                       {!x.disabled && Number(x.badge || 0) > 0 ? (
                         <span className="quickBadge">{Math.min(99, Number(x.badge || 0))}</span>
@@ -2569,7 +2571,7 @@ async function submitSocioForm() {
                   ) : (
                     <a
                       key={x.key}
-                      className={cls("quickTile", x.disabled && "quickTileDisabled")}
+                      className={cls("quickTile", x.icon && "quickTileWithIcon", x.disabled && "quickTileDisabled")}
                       href={x.href}
                       aria-disabled={x.disabled ? "true" : "false"}
                       target={x.href.startsWith("http") ? "_blank" : undefined}
@@ -2578,6 +2580,7 @@ async function submitSocioForm() {
                         if (x.disabled) e.preventDefault();
                       }}
                     >
+                      {x.icon ? <img className="quickTileIcon" src={x.icon} alt="" aria-hidden="true" /> : null}
                       <span>{x.label}</span>
                       {!x.disabled && Number(x.badge || 0) > 0 ? (
                         <span className="quickBadge">{Math.min(99, Number(x.badge || 0))}</span>
@@ -3431,7 +3434,7 @@ async function submitSocioForm() {
 
 <h3>Inicio (accesos rápidos)</h3>
 <ul>
-  <li><b>Bolsa de trabajo</b>: acceso al módulo (en desarrollo).</li>
+  <li><b>Talento PyME</b>: acceso directo a la plataforma externa de talento y empleo PyME.</li>
   <li><b>Beneficios</b>: beneficios para socios y comunidad (desde Inicio).</li>
   <li><b>Agenda</b>: eventos y actividades (desde Inicio).</li>
   <li><b>Requerimientos institucionales</b>: acceso protegido por clave (sirve clave de socio o clave admin).</li>
@@ -3454,7 +3457,7 @@ async function submitSocioForm() {
 <h3>Accesos protegidos</h3>
 <div className="muted">
   Si alguien que no es socio intenta abrir “Requerimientos institucionales”, deberá ingresar una clave válida.
-  Esto evita que visitantes de “Bolsa de trabajo” exploren botones delicados.
+  Esto evita que visitantes de accesos públicos exploren botones delicados.
 </div>
 
 <h3>Bloquear zoom</h3>

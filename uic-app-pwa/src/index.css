@@ -169,6 +169,21 @@ a{color:inherit}
   appearance:none;
 }
 
+.quickTileWithIcon{
+  flex-direction:column;
+  gap:4px;
+  padding:7px 6px;
+}
+.quickTileIcon{
+  width:30px;
+  height:30px;
+  object-fit:contain;
+  border-radius:8px;
+  background:#fff;
+  box-shadow:0 1px 5px rgba(0,0,0,0.18);
+  flex:0 0 auto;
+}
+
 .quickBadge{
   display:inline-flex;
   align-items:center;
