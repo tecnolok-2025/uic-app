@@ -1,6 +1,6 @@
 # UIC APP — Estado del proyecto (snapshot)
 
-**Release actual:** 0.36.0
+**Release actual:** 0.36.1
 
 ## Arquitectura
 - **PWA:** React + Vite + PWA (vite-plugin-pwa) — carpeta `uic-app-pwa/`
@@ -29,3 +29,9 @@
 - Bolsa de trabajo: localidad en mobile se “pegaba” cuando era datalist → en 0.35.0 se usa `<select>` + “Limpiar”.
 - Accesos rápidos: en 0.36.0 se oculta “Bolsa de trabajo” y se reemplaza por “Talento PyME” con link externo e ícono.
 - Versiones múltiples en App.jsx/main.jsx → en 0.35.0 se centraliza en `src/version.js`.
+
+
+## Cambios v0.36.1
+- Requerimientos institucionales pasa a ser acceso directo externo sin solicitud de clave.
+- Se elimina el modal de ingreso de clave para ese botón.
+- Se actualiza versión/cache PWA a 0.36.1.

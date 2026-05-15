@@ -373,51 +373,8 @@ const [memberPwOpen, setMemberPwOpen] = useState(false);
   // UX: overlay al forzar actualización (en algunos celulares tarda y parece que "no hizo nada")
   const [refreshing, setRefreshing] = useState(false);
 
-// Acceso protegido: Requerimientos Institucionales (pide clave socio o admin)
+// Acceso directo: Requerimientos Institucionales (sin clave)
 const REQ_INST_URL = "https://cpf-web.onrender.com/"; // link actual del sistema de requerimientos
-const [reqGateOpen, setReqGateOpen] = useState(false);
-const [reqGatePass, setReqGatePass] = useState("");
-const [reqGateErr, setReqGateErr] = useState("");
-const [reqGateBusy, setReqGateBusy] = useState(false);
-
-const openReqGate = () => {
-  setReqGatePass("");
-  setReqGateErr("");
-  setReqGateOpen(true);
-};
-
-const verifyReqGateAndOpen = async () => {
-  const pw = (reqGatePass || "").trim();
-  if (!pw) { setReqGateErr("Ingresá una clave."); return; }
-
-  // Si el admin está activo en este dispositivo, permitimos validar local (evita depender de red)
-  if (adminToken && pw === adminToken) {
-    try { window.open(REQ_INST_URL, "_blank", "noreferrer"); } catch (_) { window.location.href = REQ_INST_URL; }
-    setReqGateOpen(false);
-    return;
-  }
-
-  if (!API_BASE) { setReqGateErr("No hay conexión con la API para validar la clave."); return; }
-
-  setReqGateBusy(true);
-  setReqGateErr("");
-  try {
-    const r = await fetch(`${API_BASE}/access/verify`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ password: pw }),
-    });
-    const data = await r.json().catch(() => ({}));
-    if (!r.ok || !data?.ok) throw new Error(data?.error || "Clave incorrecta.");
-    try { window.open(REQ_INST_URL, "_blank", "noreferrer"); } catch (_) { window.location.href = REQ_INST_URL; }
-    setReqGateOpen(false);
-  } catch (e) {
-    setReqGateErr(String(e?.message || e));
-  } finally {
-    setReqGateBusy(false);
-  }
-};
-
 
 // ---------------- Bolsa de Trabajo ----------------
 const [bolsaMode, setBolsaMode] = useState("alta"); // alta | buscar
@@ -1688,8 +1645,8 @@ const quickLinks = [
   { key: "comunicacion_socio", label: "Comunicación al socio", href: "#", onClick: () => { setTab("comunicacion"); } },
   { key: "socios", label: "Socios", href: "#", onClick: () => { setTab("socios"); } },
 
-  // Protegido por clave (socio o admin)
-  { key: "req_institucionales", label: "Requerimientos institucionales", href: "#", onClick: () => openReqGate() },
+  // v0.36.1: acceso directo sin clave a Requerimientos Institucionales.
+  { key: "req_institucionales", label: "Requerimientos institucionales", href: REQ_INST_URL },
 
   { key: "mensajes_admin", label: "Comunicación al administrador", href: "#", onClick: () => { setTab("mensajes"); }, badge: (msgsUnseen || 0) },
   { key: "sitio_uic", label: "Sitio UIC", href: "https://uic-campana.com.ar/" },
@@ -3437,7 +3394,7 @@ async function submitSocioForm() {
   <li><b>Talento PyME</b>: acceso directo a la plataforma externa de talento y empleo PyME.</li>
   <li><b>Beneficios</b>: beneficios para socios y comunidad (desde Inicio).</li>
   <li><b>Agenda</b>: eventos y actividades (desde Inicio).</li>
-  <li><b>Requerimientos institucionales</b>: acceso protegido por clave (sirve clave de socio o clave admin).</li>
+  <li><b>Requerimientos institucionales</b>: acceso directo al sistema externo de requerimientos.</li>
 </ul>
 
 <h3>Portal del Socio</h3>
@@ -3454,10 +3411,9 @@ async function submitSocioForm() {
   <li>Tildes estilo WhatsApp: <b>✓</b> enviado, <b>✓</b> entregado, <b>✓✓</b> leído (celeste).</li>
 </ul>
 
-<h3>Accesos protegidos</h3>
+<h3>Accesos externos</h3>
 <div className="muted">
-  Si alguien que no es socio intenta abrir “Requerimientos institucionales”, deberá ingresar una clave válida.
-  Esto evita que visitantes de accesos públicos exploren botones delicados.
+  Talento PyME y Requerimientos institucionales se abren como accesos directos externos desde Inicio.
 </div>
 
 <h3>Bloquear zoom</h3>
@@ -4759,35 +4715,6 @@ async function submitSocioForm() {
 
       <div className="appFooter">{APP_VERSION}</div>
 
-      {reqGateOpen ? (
-  <div className="modalOverlay" onClick={() => setReqGateOpen(false)}>
-    <div className="modal" onClick={(e) => e.stopPropagation()}>
-      <div className="modalTitle">Acceso a Requerimientos Institucionales</div>
-      <div className="modalSub">Ingresá una clave de socio o la clave de administrador.</div>
-
-      <label className="formLabel">
-        Clave
-        <input
-          className="input"
-          type="password"
-          value={reqGatePass}
-          onChange={(e) => setReqGatePass(e.target.value)}
-          placeholder="Ingresá la clave…"
-          autoFocus
-        />
-      </label>
-
-      {reqGateErr ? <div className="muted" style={{ marginTop: 8 }}>⚠ {reqGateErr}</div> : null}
-
-      <div className="rowEnd" style={{ marginTop: 12 }}>
-        <button className="btnGhost" onClick={() => setReqGateOpen(false)} disabled={reqGateBusy}>Cancelar</button>
-        <button className="btnPrimary" onClick={verifyReqGateAndOpen} disabled={reqGateBusy}>
-          {reqGateBusy ? "Verificando…" : "Ingresar"}
-        </button>
-      </div>
-    </div>
-  </div>
-) : null}
 
 <nav className="bottomNav">
   <button className={cls("navBtn", tab === "inicio" && "navActive")} onClick={() => setTab("inicio")}>
