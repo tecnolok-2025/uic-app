@@ -1,6 +1,6 @@
 # UIC APP — Estado del proyecto (snapshot)
 
-**Release actual:** 0.36.1
+**Release actual:** 0.36.5
 
 ## Arquitectura
 - **PWA:** React + Vite + PWA (vite-plugin-pwa) — carpeta `uic-app-pwa/`
@@ -20,7 +20,7 @@
 
 ## Módulos principales
 - Inicio / Publicaciones (WordPress feed)
-- Pro.Industrial
+- Trazabilidad
 - Manual (PDF)
 - Ajustes (admin token, forzar actualización, etc.)
 
@@ -35,3 +35,9 @@
 - Requerimientos institucionales pasa a ser acceso directo externo sin solicitud de clave.
 - Se elimina el modal de ingreso de clave para ese botón.
 - Se actualiza versión/cache PWA a 0.36.1.
+
+
+## Cambios v0.36.5
+- Reemplazo de Pro.Industrial por Trazabilidad.
+- Tablero administrativo con métricas de visitas, IPs, botones, pantallas e histórico de almacenamiento.
+- Mejora visual de botones superiores/accesos rápidos.

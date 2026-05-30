@@ -198,6 +198,34 @@ let COMMS_STORE = readCommsStore();
 // Bolsa de Trabajo (fallback JSON si no hay DB)
 let JOBS_STORE = { items: [] };
 
+// Trazabilidad de uso de la App UIC (v0.36.5)
+const TRACE_FILE = (process.env.TRACE_FILE || path.join(__dirname, "data", "trace.json")).trim();
+const TRACE_KEEP = Math.min(Math.max(parseInt(process.env.TRACE_KEEP || "50000", 10) || 50000, 1000), 200000);
+const TRACE_DEFAULT_DAYS = Math.min(Math.max(parseInt(process.env.TRACE_DEFAULT_DAYS || "30", 10) || 30, 1), 365);
+
+// Trazabilidad (fallback JSON si no hay DB)
+function readTraceStore() {
+  try {
+    const raw = fs.readFileSync(TRACE_FILE, "utf-8");
+    const parsed = JSON.parse(raw);
+    if (parsed && Array.isArray(parsed.events)) {
+      return {
+        events: parsed.events,
+        storageHistory: Array.isArray(parsed.storageHistory) ? parsed.storageHistory : [],
+        updatedAt: parsed.updatedAt || new Date().toISOString(),
+      };
+    }
+  } catch (_) {}
+  return { events: [], storageHistory: [], updatedAt: new Date().toISOString() };
+}
+
+function writeTraceStore(store) {
+  ensureDir(path.dirname(TRACE_FILE));
+  fs.writeFileSync(TRACE_FILE, JSON.stringify(store, null, 2), "utf-8");
+}
+
+let TRACE_STORE = readTraceStore();
+
 
 /* ---------------------- Persistencia (Opción B: DB externa) ---------------------- */
 
@@ -566,6 +594,39 @@ async function initDb() {
     await pool.query(`CREATE INDEX IF NOT EXISTS uic_job_candidates_updated_idx ON uic_job_candidates(updated_at DESC)`);
     await pool.query(`CREATE INDEX IF NOT EXISTS uic_job_candidates_area_idx ON uic_job_candidates(area_trabajo)`);
     await pool.query(`CREATE INDEX IF NOT EXISTS uic_job_candidates_localidad_idx ON uic_job_candidates(localidad)`);
+
+    // Trazabilidad de uso de la App UIC (v0.36.5)
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS uic_trace_events (
+        id TEXT PRIMARY KEY,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        ip TEXT DEFAULT '',
+        user_agent TEXT DEFAULT '',
+        session_id TEXT DEFAULT '',
+        event_type TEXT NOT NULL,
+        target TEXT NOT NULL,
+        tab TEXT DEFAULT '',
+        path TEXT DEFAULT '',
+        referrer TEXT DEFAULT ''
+      )
+    `);
+    await pool.query(`CREATE INDEX IF NOT EXISTS uic_trace_events_created_idx ON uic_trace_events(created_at DESC)`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS uic_trace_events_ip_idx ON uic_trace_events(ip)`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS uic_trace_events_target_idx ON uic_trace_events(target)`);
+
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS uic_trace_storage_daily (
+        day DATE PRIMARY KEY,
+        used_units INT NOT NULL DEFAULT 0,
+        capacity_units INT NOT NULL DEFAULT 0,
+        percent INT NOT NULL DEFAULT 0,
+        agenda_count INT NOT NULL DEFAULT 0,
+        comms_count INT NOT NULL DEFAULT 0,
+        jobs_count INT NOT NULL DEFAULT 0,
+        trace_count INT NOT NULL DEFAULT 0,
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `);
 
 dbReady = true;
     console.log("✅ DB externa habilitada (DATABASE_URL). Persistencia OK.");
@@ -2050,46 +2111,277 @@ app.post("/member/reset-password", async (req, res) => {
 
 /* --------------------- Mensajes del socio endpoints --------------------- */
 
-// Meta (para badges)
-app.get("/system/storage-status", async (req, res) => {
+
+// --------------------- Trazabilidad / Analítica App UIC ---------------------
+function __safeText(v, max = 140) {
+  return String(v ?? "")
+    .replace(/[\u0000-\u001F\u007F]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, max);
+}
+
+function getClientIp(req) {
+  const xff = String(req.headers["x-forwarded-for"] || "").split(",")[0].trim();
+  return __safeText(xff || req.ip || req.socket?.remoteAddress || "unknown", 80);
+}
+
+async function getStorageSnapshot() {
+  let agendaCount = 0;
+  let commsCount = 0;
+  let jobsCount = 0;
+  let traceCount = 0;
+
+  if (dbReady && pool) {
+    const [eventsR, commsR, jobsR, traceR] = await Promise.all([
+      pool.query("SELECT COUNT(*)::int AS count FROM uic_events"),
+      pool.query("SELECT COUNT(*)::int AS count FROM uic_comms"),
+      pool.query("SELECT COUNT(*)::int AS count FROM uic_job_candidates"),
+      pool.query("SELECT COUNT(*)::int AS count FROM uic_trace_events"),
+    ]);
+    agendaCount = Number(eventsR.rows?.[0]?.count || 0);
+    commsCount = Number(commsR.rows?.[0]?.count || 0);
+    jobsCount = Number(jobsR.rows?.[0]?.count || 0);
+    traceCount = Number(traceR.rows?.[0]?.count || 0);
+  } else {
+    agendaCount = Array.isArray(EVENTS_STORE?.events) ? EVENTS_STORE.events.length : 0;
+    commsCount = Array.isArray(COMMS_STORE?.items) ? COMMS_STORE.items.length : 0;
+    jobsCount = Array.isArray(JOBS_STORE?.items) ? JOBS_STORE.items.length : 0;
+    traceCount = Array.isArray(TRACE_STORE?.events) ? TRACE_STORE.events.length : 0;
+  }
+
+  // Las visitas pesan menos que un CV, pero igual consumen trazabilidad persistente.
+  const weightedTotal = agendaCount + commsCount + (jobsCount * 3) + Math.ceil(traceCount / 25);
+  const percent = Math.max(0, Math.min(100, Math.round((weightedTotal / STORAGE_CAPACITY_UNITS) * 100)));
+  const status = percent <= 60 ? "verde" : percent <= 85 ? "amarillo" : "rojo";
+  return {
+    ok: true,
+    status,
+    percent,
+    capacityUnits: STORAGE_CAPACITY_UNITS,
+    usedUnits: weightedTotal,
+    details: {
+      agenda: agendaCount,
+      comunicaciones: commsCount,
+      cvs: jobsCount,
+      trazabilidad: traceCount,
+    },
+    updatedAt: new Date().toISOString(),
+    note: "Estimación orientativa del uso de almacenamiento DB, incluyendo trazabilidad.",
+  };
+}
+
+async function sampleStorageDaily(reason = "auto") {
   try {
-    let agendaCount = 0;
-    let commsCount = 0;
-    let jobsCount = 0;
+    const snap = await getStorageSnapshot();
+    const day = new Date().toISOString().slice(0, 10);
+    if (dbReady && pool) {
+      await pool.query(
+        `INSERT INTO uic_trace_storage_daily(day, used_units, capacity_units, percent, agenda_count, comms_count, jobs_count, trace_count, updated_at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,NOW())
+         ON CONFLICT (day) DO UPDATE SET
+           used_units = EXCLUDED.used_units,
+           capacity_units = EXCLUDED.capacity_units,
+           percent = EXCLUDED.percent,
+           agenda_count = EXCLUDED.agenda_count,
+           comms_count = EXCLUDED.comms_count,
+           jobs_count = EXCLUDED.jobs_count,
+           trace_count = EXCLUDED.trace_count,
+           updated_at = NOW()`,
+        [
+          day,
+          snap.usedUnits || 0,
+          snap.capacityUnits || STORAGE_CAPACITY_UNITS,
+          snap.percent || 0,
+          snap.details?.agenda || 0,
+          snap.details?.comunicaciones || 0,
+          snap.details?.cvs || 0,
+          snap.details?.trazabilidad || 0,
+        ]
+      );
+    } else {
+      TRACE_STORE.storageHistory = Array.isArray(TRACE_STORE.storageHistory) ? TRACE_STORE.storageHistory : [];
+      const row = {
+        day,
+        used_units: snap.usedUnits || 0,
+        capacity_units: snap.capacityUnits || STORAGE_CAPACITY_UNITS,
+        percent: snap.percent || 0,
+        agenda_count: snap.details?.agenda || 0,
+        comms_count: snap.details?.comunicaciones || 0,
+        jobs_count: snap.details?.cvs || 0,
+        trace_count: snap.details?.trazabilidad || 0,
+        updated_at: new Date().toISOString(),
+        reason,
+      };
+      const idx = TRACE_STORE.storageHistory.findIndex((x) => String(x.day) === day);
+      if (idx >= 0) TRACE_STORE.storageHistory[idx] = row;
+      else TRACE_STORE.storageHistory.push(row);
+      TRACE_STORE.storageHistory = TRACE_STORE.storageHistory.slice(-365);
+      TRACE_STORE.updatedAt = new Date().toISOString();
+      writeTraceStore(TRACE_STORE);
+    }
+    return snap;
+  } catch (e) {
+    console.log("⚠️ sampleStorageDaily error:", e?.message || e);
+    return null;
+  }
+}
+
+async function insertTraceEvent(req, body = {}) {
+  const id = _newId();
+  const row = {
+    id,
+    created_at: new Date().toISOString(),
+    ip: getClientIp(req),
+    user_agent: __safeText(req.headers["user-agent"] || "", 220),
+    session_id: __safeText(body.session_id || body.sessionId || "", 100),
+    event_type: __safeText(body.event_type || body.eventType || "event", 50) || "event",
+    target: __safeText(body.target || body.label || body.name || "sin identificar", 140) || "sin identificar",
+    tab: __safeText(body.tab || "", 80),
+    path: __safeText(body.path || body.url || "", 240),
+    referrer: __safeText(body.referrer || "", 240),
+  };
+
+  if (dbReady && pool) {
+    await pool.query(
+      `INSERT INTO uic_trace_events(id, ip, user_agent, session_id, event_type, target, tab, path, referrer)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+      [row.id, row.ip, row.user_agent, row.session_id, row.event_type, row.target, row.tab, row.path, row.referrer]
+    );
+    await pool.query(
+      `DELETE FROM uic_trace_events WHERE id IN (
+         SELECT id FROM uic_trace_events ORDER BY created_at DESC OFFSET $1
+       )`,
+      [TRACE_KEEP]
+    );
+  } else {
+    TRACE_STORE.events = Array.isArray(TRACE_STORE.events) ? TRACE_STORE.events : [];
+    TRACE_STORE.events.unshift(row);
+    TRACE_STORE.events = TRACE_STORE.events.slice(0, TRACE_KEEP);
+    TRACE_STORE.updatedAt = new Date().toISOString();
+    writeTraceStore(TRACE_STORE);
+  }
+
+  // Mantiene una muestra diaria persistente de crecimiento del uso.
+  sampleStorageDaily("trace").catch(() => {});
+  return row;
+}
+
+function countBy(items, getter, limit = 10) {
+  const m = new Map();
+  for (const it of items || []) {
+    const k = getter(it) || "s/d";
+    m.set(k, (m.get(k) || 0) + 1);
+  }
+  return Array.from(m.entries())
+    .map(([label, count]) => ({ label, count }))
+    .sort((a, b) => b.count - a.count || String(a.label).localeCompare(String(b.label)))
+    .slice(0, limit);
+}
+
+function dayKey(iso) {
+  try { return new Date(iso).toISOString().slice(0, 10); } catch (_) { return "s/d"; }
+}
+
+app.post("/trace", async (req, res) => {
+  try {
+    if (__rateLimited(req, res, "trace", 240, 10 * 60 * 1000)) return;
+    const row = await insertTraceEvent(req, req.body || {});
+    return res.json({ ok: true, id: row.id });
+  } catch (e) {
+    console.log("⚠️ trace insert error:", e?.message || e);
+    return res.status(500).json({ error: "No se pudo registrar trazabilidad." });
+  }
+});
+
+app.get("/admin/trace/summary", requireAdmin, async (req, res) => {
+  try {
+    const days = Math.min(Math.max(parseInt(req.query?.days || TRACE_DEFAULT_DAYS, 10) || TRACE_DEFAULT_DAYS, 1), 365);
+    const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+    let events = [];
+    let storageHistory = [];
+
+    const storageNow = await sampleStorageDaily("admin_summary");
 
     if (dbReady && pool) {
-      const [eventsR, commsR, jobsR] = await Promise.all([
-        pool.query("SELECT COUNT(*)::int AS count FROM uic_events"),
-        pool.query("SELECT COUNT(*)::int AS count FROM uic_comms"),
-        pool.query("SELECT COUNT(*)::int AS count FROM uic_job_candidates"),
-      ]);
-      agendaCount = Number(eventsR.rows?.[0]?.count || 0);
-      commsCount = Number(commsR.rows?.[0]?.count || 0);
-      jobsCount = Number(jobsR.rows?.[0]?.count || 0);
+      const r = await pool.query(
+        `SELECT id, created_at, ip, user_agent, session_id, event_type, target, tab, path, referrer
+           FROM uic_trace_events
+          WHERE created_at >= $1
+          ORDER BY created_at DESC
+          LIMIT 5000`,
+        [since.toISOString()]
+      );
+      events = (r.rows || []).map((x) => ({
+        ...x,
+        created_at: x.created_at ? new Date(x.created_at).toISOString() : "",
+      }));
+      const sh = await pool.query(
+        `SELECT day, used_units, capacity_units, percent, agenda_count, comms_count, jobs_count, trace_count, updated_at
+           FROM uic_trace_storage_daily
+          WHERE day >= $1::date
+          ORDER BY day ASC`,
+        [since.toISOString().slice(0, 10)]
+      );
+      storageHistory = (sh.rows || []).map((x) => ({
+        day: x.day ? new Date(x.day).toISOString().slice(0, 10) : "",
+        used_units: Number(x.used_units || 0),
+        capacity_units: Number(x.capacity_units || 0),
+        percent: Number(x.percent || 0),
+        agenda_count: Number(x.agenda_count || 0),
+        comms_count: Number(x.comms_count || 0),
+        jobs_count: Number(x.jobs_count || 0),
+        trace_count: Number(x.trace_count || 0),
+        updated_at: x.updated_at ? new Date(x.updated_at).toISOString() : "",
+      }));
     } else {
-      agendaCount = Array.isArray(EVENTS_STORE?.events) ? EVENTS_STORE.events.length : 0;
-      commsCount = Array.isArray(COMMS_STORE?.items) ? COMMS_STORE.items.length : 0;
-      jobsCount = Array.isArray(JOBS_STORE?.items) ? JOBS_STORE.items.length : 0;
+      events = (TRACE_STORE.events || []).filter((x) => {
+        const t = new Date(x.created_at || 0).getTime();
+        return Number.isFinite(t) && t >= since.getTime();
+      }).slice(0, 5000);
+      storageHistory = (TRACE_STORE.storageHistory || []).filter((x) => String(x.day || "") >= since.toISOString().slice(0, 10));
     }
 
-    const weightedTotal = agendaCount + commsCount + (jobsCount * 3);
-    const percent = Math.max(0, Math.min(100, Math.round((weightedTotal / STORAGE_CAPACITY_UNITS) * 100)));
-    const status = percent <= 60 ? "verde" : percent <= 85 ? "amarillo" : "rojo";
+    const totalEvents = events.length;
+    const visits = events.filter((x) => ["app_open", "view"].includes(String(x.event_type || ""))).length;
+    const uniqueIps = new Set(events.map((x) => x.ip).filter(Boolean)).size;
+    const uniqueSessions = new Set(events.map((x) => x.session_id).filter(Boolean)).size;
+    const buttonEvents = events.filter((x) => /click|quick|nav/i.test(String(x.event_type || "")));
+    const pageEvents = events.filter((x) => String(x.event_type || "") === "view");
+
+    const byDay = countBy(events, (x) => dayKey(x.created_at), 365).sort((a, b) => String(a.label).localeCompare(String(b.label)));
+    const topButtons = countBy(buttonEvents, (x) => x.target, 20);
+    const topPages = countBy(pageEvents, (x) => x.target || x.tab, 20);
+    const topIps = countBy(events, (x) => x.ip, 30).map((it) => {
+      const last = events.find((x) => x.ip === it.label);
+      return { ...it, lastSeen: last?.created_at || "", userAgent: last?.user_agent || "" };
+    });
 
     return res.json({
       ok: true,
-      status,
-      percent,
-      capacityUnits: STORAGE_CAPACITY_UNITS,
-      usedUnits: weightedTotal,
-      details: {
-        agenda: agendaCount,
-        comunicaciones: commsCount,
-        cvs: jobsCount,
-      },
-      updatedAt: new Date().toISOString(),
-      note: "Estimación orientativa del uso de almacenamiento DB.",
+      days,
+      generatedAt: new Date().toISOString(),
+      stats: { totalEvents, visits, uniqueIps, uniqueSessions },
+      topButtons,
+      topPages,
+      topIps,
+      byDay,
+      storage: storageNow,
+      storageHistory,
+      recent: events.slice(0, 80),
+      note: "Trazabilidad administrativa: IP, sesión técnica, botones, pantallas y uso estimado de almacenamiento.",
     });
+  } catch (e) {
+    console.log("⚠️ trace summary error:", e?.message || e);
+    return res.status(500).json({ error: "No se pudo calcular la trazabilidad." });
+  }
+});
+
+// Meta (para badges)
+app.get("/system/storage-status", async (req, res) => {
+  try {
+    const snap = await sampleStorageDaily("storage_status");
+    return res.json(snap || await getStorageSnapshot());
   } catch (e) {
     console.log("⚠️ DB storage-status error:", e?.message || e);
     return res.status(500).json({ error: "No se pudo calcular el estado del almacenamiento." });

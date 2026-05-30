@@ -47,6 +47,60 @@ async function apiGet(path) {
   return data;
 }
 
+
+function getTraceSessionId() {
+  const key = "uic_trace_session_id_v1";
+  try {
+    let v = localStorage.getItem(key);
+    if (!v) {
+      const rnd = (globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`);
+      v = `uic-${rnd}`;
+      localStorage.setItem(key, v);
+    }
+    return v;
+  } catch (_) {
+    return `uic-fallback-${Date.now()}`;
+  }
+}
+
+function postTraceEvent(eventType, target, extra = {}) {
+  try {
+    const payload = {
+      event_type: String(eventType || "event"),
+      target: String(target || "sin identificar"),
+      tab: String(extra.tab || ""),
+      session_id: getTraceSessionId(),
+      path: `${window.location.pathname || "/"}${window.location.search || ""}`,
+      referrer: document.referrer || "",
+    };
+    const url = `${API_BASE}/trace`;
+    const body = JSON.stringify(payload);
+    if (navigator?.sendBeacon) {
+      try {
+        const blob = new Blob([body], { type: "application/json" });
+        const ok = navigator.sendBeacon(url, blob);
+        if (ok) return;
+      } catch (_) {}
+    }
+    fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body, keepalive: true }).catch(() => {});
+  } catch (_) {
+    // La trazabilidad no debe interrumpir nunca la navegación de la app.
+  }
+}
+
+const TRACE_TAB_LABEL = {
+  inicio: "Inicio",
+  publicaciones: "Publicaciones",
+  trazabilidad: "Trazabilidad",
+  manual: "Manual",
+  beneficios: "Beneficios",
+  agenda: "Agenda",
+  comunicacion: "Comunicación al socio",
+  mensajes: "Comunicación al administrador",
+  socios: "Socios",
+  ajustes: "Ajustes",
+};
+
 async function loadStorageStatusSafe(setter, setBusy, setError) {
   setBusy?.(true);
   setError?.("");
@@ -168,7 +222,7 @@ export default function App() {
     if (c === "todos" || c === "all") return "";
     return c;
   };
-  const [tab, setTab] = useState("inicio"); // inicio | publicaciones | proindustrial | manual | beneficios | agenda | bolsa | comunicacion | mensajes | socios | ajustes
+  const [tab, setTab] = useState("inicio"); // inicio | publicaciones | trazabilidad | manual | beneficios | agenda | bolsa | comunicacion | mensajes | socios | ajustes
 
   // Zoom lock (evita zoom por pellizco y el auto-zoom al escribir en iOS).
   // Se guarda por dispositivo.
@@ -372,6 +426,12 @@ const [memberPwOpen, setMemberPwOpen] = useState(false);
 
   // UX: overlay al forzar actualización (en algunos celulares tarda y parece que "no hizo nada")
   const [refreshing, setRefreshing] = useState(false);
+
+  // Trazabilidad (v0.36.5)
+  const [traceDays, setTraceDays] = useState(30);
+  const [traceData, setTraceData] = useState(null);
+  const [traceBusy, setTraceBusy] = useState(false);
+  const [traceError, setTraceError] = useState("");
 
 // Acceso directo: Requerimientos Institucionales (sin clave)
 const REQ_INST_URL = "https://cpf-web.onrender.com/"; // link actual del sistema de requerimientos
@@ -1605,10 +1665,6 @@ useEffect(() => {
     if (tab === "publicaciones") {
       loadPosts({ perPage: 6, page: 1, append: false, category: categoryParam, q: searchQuery });
     }
-
-    if (tab === "proindustrial") {
-      loadPosts({ perPage: 6, page: 1, append: false, category: "promocion-industrial", q: "" });
-    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab, categorySlug, searchQuery]);
 
@@ -1632,6 +1688,83 @@ useEffect(() => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab, sociosCategory, sociosSearchQuery]);
 
+
+
+useEffect(() => {
+  postTraceEvent("app_open", "App UIC", { tab: "inicio" });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+}, []);
+
+useEffect(() => {
+  postTraceEvent("view", TRACE_TAB_LABEL[tab] || tab, { tab });
+}, [tab]);
+
+async function activateAdminToken(tok) {
+  const clean = String(tok || "").trim();
+  if (!clean) return false;
+  const r = await fetch(`${API_BASE}/admin/ping`, { headers: { "x-admin-token": clean } });
+  if (!r.ok) return false;
+  sessionStorage.setItem("uic_admin_token", clean);
+  setAdminToken(clean);
+  setAdminDraft(clean);
+  return true;
+}
+
+async function openTraceAccess() {
+  postTraceEvent("nav_click", "Trazabilidad", { tab });
+  if (adminToken) {
+    setTab("trazabilidad");
+    return;
+  }
+  const tok = window.prompt("Trazabilidad es de uso exclusivo del administrador. Ingresá la clave admin:");
+  if (!tok) return;
+  try {
+    const ok = await activateAdminToken(tok);
+    if (!ok) return alert("Clave admin inválida o no autorizada.");
+    setTab("trazabilidad");
+  } catch (_) {
+    alert("No se pudo validar la clave admin. Revisá conexión con el servidor.");
+  }
+}
+
+async function loadTraceSummary(days = traceDays) {
+  if (!adminToken) return;
+  setTraceBusy(true);
+  setTraceError("");
+  try {
+    const r = await fetch(`${API_BASE}/admin/trace/summary?days=${encodeURIComponent(days)}`, {
+      headers: { "x-admin-token": adminToken },
+      cache: "no-store",
+    });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(j?.error || `HTTP ${r.status}`);
+    setTraceData(j);
+  } catch (e) {
+    setTraceError(String(e?.message || e));
+    setTraceData(null);
+  } finally {
+    setTraceBusy(false);
+  }
+}
+
+useEffect(() => {
+  if (tab === "trazabilidad" && adminToken) loadTraceSummary(traceDays);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+}, [tab, adminToken, traceDays]);
+
+function traceNavigate(nextTab, label) {
+  postTraceEvent("nav_click", label || TRACE_TAB_LABEL[nextTab] || nextTab, { tab });
+  setTab(nextTab);
+}
+
+function maxOf(list, key = "count") {
+  const vals = (list || []).map((x) => Number(x?.[key] || 0));
+  return Math.max(1, ...vals);
+}
+
+function fmtTraceDate(iso) {
+  try { return new Date(iso).toLocaleString("es-AR", { dateStyle: "short", timeStyle: "short" }); } catch (_) { return iso || ""; }
+}
 
 const quickLinks = [
   { key: "hacete_socio", label: "Hacete socio", href: "https://uic-campana.com.ar/hacete-socio/" },
@@ -2516,6 +2649,7 @@ async function submitSocioForm() {
                       aria-disabled={x.disabled ? "true" : "false"}
                       onClick={() => {
                         if (x.disabled) return;
+                        postTraceEvent("quick_click", x.label, { tab: "inicio" });
                         x.onClick?.();
                       }}
                     >
@@ -2534,7 +2668,8 @@ async function submitSocioForm() {
                       target={x.href.startsWith("http") ? "_blank" : undefined}
                       rel={x.href.startsWith("http") ? "noreferrer" : undefined}
                       onClick={(e) => {
-                        if (x.disabled) e.preventDefault();
+                        if (x.disabled) { e.preventDefault(); return; }
+                        postTraceEvent("quick_click", x.label, { tab: "inicio" });
                       }}
                     >
                       {x.icon ? <img className="quickTileIcon" src={x.icon} alt="" aria-hidden="true" /> : null}
@@ -2624,13 +2759,13 @@ async function submitSocioForm() {
           </>
         )}
 
-        {(tab === "publicaciones" || tab === "proindustrial") && (
+        {tab === "publicaciones" && (
           <section className="card">
             <div className="rowBetween">
-              <div className="cardTitle">{tab === "proindustrial" ? "Pro.Industrial" : "Publicaciones"}</div>
+              <div className="cardTitle">Publicaciones</div>
             </div>
 
-            {tab !== "proindustrial" && (
+            {true && (
             <>
             <div className="searchRow">
               <input
@@ -2690,7 +2825,7 @@ async function submitSocioForm() {
                 <button
                   className="btnSecondary"
                   disabled={postsPager.page <= 1}
-                  onClick={() => loadPosts({ perPage: postsPager.per_page, page: Math.max(1, postsPager.page - 1), category: (tab === "proindustrial" ? "promocion-industrial" : categoryParam), q: (tab === "proindustrial" ? "" : searchQuery) })}
+                  onClick={() => loadPosts({ perPage: postsPager.per_page, page: Math.max(1, postsPager.page - 1), category: categoryParam, q: searchQuery })}
                 >
                   ◀
                 </button>
@@ -2700,7 +2835,7 @@ async function submitSocioForm() {
                 <button
                   className="btnSecondary"
                   disabled={!postsPager.has_more}
-                  onClick={() => loadPosts({ perPage: postsPager.per_page, page: postsPager.page + 1, category: (tab === "proindustrial" ? "promocion-industrial" : categoryParam), q: (tab === "proindustrial" ? "" : searchQuery) })}
+                  onClick={() => loadPosts({ perPage: postsPager.per_page, page: postsPager.page + 1, category: categoryParam, q: searchQuery })}
                 >
                   ▶
                 </button>
@@ -3384,7 +3519,7 @@ async function submitSocioForm() {
 <ul>
   <li><b>Inicio</b>: accesos rápidos + últimas publicaciones.</li>
   <li><b>Publicaciones</b>: listado completo con búsqueda y filtros.</li>
-  <li><b>Pro.Industrial</b>: publicaciones de la categoría “Promoción Industrial”.</li>
+  <li><b>Trazabilidad</b>: tablero administrativo con métricas de uso, IPs, botones visitados, pantallas más consultadas y crecimiento de almacenamiento.</li>
   <li><b>Manual</b>: esta ayuda.</li>
   <li><b>Ajustes</b>: versión, clave admin, login socio, y utilidades (incluye “Bloquear zoom”).</li>
 </ul>
@@ -4476,6 +4611,174 @@ async function submitSocioForm() {
     </section>
   </main>
 )}
+
+
+{tab === "trazabilidad" && (
+  <section className="card tracePage">
+    <div className="rowBetween">
+      <div>
+        <div className="cardTitle">Trazabilidad</div>
+        <div className="cardSub">Panel administrativo para medir comportamiento de uso, visitas, botones, pantallas e histórico de almacenamiento.</div>
+      </div>
+      <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
+        <select className="input traceSelect" value={traceDays} onChange={(e) => setTraceDays(Number(e.target.value || 30))}>
+          <option value={7}>Últimos 7 días</option>
+          <option value={30}>Últimos 30 días</option>
+          <option value={90}>Últimos 90 días</option>
+          <option value={365}>Últimos 365 días</option>
+        </select>
+        <button className="btnSecondary" disabled={!adminToken || traceBusy} onClick={() => loadTraceSummary(traceDays)}>
+          {traceBusy ? "Actualizando…" : "Actualizar"}
+        </button>
+      </div>
+    </div>
+
+    {!adminToken ? (
+      <div className="traceAdminGate">
+        <div className="traceGateTitle">Acceso exclusivo administrador</div>
+        <div className="muted">Ingresá la clave admin para ver el tablero de trazabilidad.</div>
+        <div className="row" style={{ gap: 8, flexWrap: "wrap", marginTop: 12 }}>
+          <input
+            className="input"
+            placeholder="Clave admin"
+            value={adminDraft}
+            onChange={(e) => setAdminDraft(e.target.value)}
+            onKeyDown={(e) => e.stopPropagation()}
+            style={{ maxWidth: 240 }}
+          />
+          <button className="btnPrimary" onClick={async () => {
+            try {
+              const ok = await activateAdminToken(adminDraft);
+              if (!ok) return alert("Clave admin inválida o no autorizada.");
+              await loadTraceSummary(traceDays);
+            } catch (_) {
+              alert("No se pudo validar la clave admin.");
+            }
+          }}>Ingresar</button>
+        </div>
+      </div>
+    ) : (
+      <>
+        {traceError ? <div className="alert" style={{ marginTop: 12 }}>{traceError}</div> : null}
+        {traceBusy && !traceData ? <div className="muted">Cargando trazabilidad…</div> : null}
+
+        {traceData ? (
+          <>
+            <div className="traceKpiGrid">
+              <div className="traceKpi"><div className="traceKpiLabel">Eventos registrados</div><div className="traceKpiValue">{traceData?.stats?.totalEvents ?? 0}</div></div>
+              <div className="traceKpi"><div className="traceKpiLabel">Visitas / pantallas</div><div className="traceKpiValue">{traceData?.stats?.visits ?? 0}</div></div>
+              <div className="traceKpi"><div className="traceKpiLabel">IPs únicas</div><div className="traceKpiValue">{traceData?.stats?.uniqueIps ?? 0}</div></div>
+              <div className="traceKpi"><div className="traceKpiLabel">Sesiones técnicas</div><div className="traceKpiValue">{traceData?.stats?.uniqueSessions ?? 0}</div></div>
+            </div>
+
+            <div className="grid2" style={{ marginTop: 12 }}>
+              <div className="tracePanel">
+                <div className="tracePanelTitle">Botones más utilizados</div>
+                <div className="traceBars">
+                  {(traceData.topButtons || []).length ? traceData.topButtons.map((x) => (
+                    <div className="traceBarRow" key={x.label}>
+                      <div className="traceBarMeta"><span>{x.label}</span><b>{x.count}</b></div>
+                      <div className="traceBarTrack"><div className="traceBarFill" style={{ width: `${Math.max(5, Math.round((Number(x.count||0)/maxOf(traceData.topButtons))*100))}%` }} /></div>
+                    </div>
+                  )) : <div className="muted">Todavía no hay clicks registrados.</div>}
+                </div>
+              </div>
+
+              <div className="tracePanel">
+                <div className="tracePanelTitle">Pantallas más visitadas</div>
+                <div className="traceBars">
+                  {(traceData.topPages || []).length ? traceData.topPages.map((x) => (
+                    <div className="traceBarRow" key={x.label}>
+                      <div className="traceBarMeta"><span>{x.label}</span><b>{x.count}</b></div>
+                      <div className="traceBarTrack"><div className="traceBarFill" style={{ width: `${Math.max(5, Math.round((Number(x.count||0)/maxOf(traceData.topPages))*100))}%` }} /></div>
+                    </div>
+                  )) : <div className="muted">Todavía no hay pantallas registradas.</div>}
+                </div>
+              </div>
+            </div>
+
+            <div className="grid2" style={{ marginTop: 12 }}>
+              <div className="tracePanel">
+                <div className="tracePanelTitle">Visitas por día</div>
+                <div className="traceDayChart">
+                  {(traceData.byDay || []).length ? traceData.byDay.map((x) => (
+                    <div className="traceDayCol" key={x.label} title={`${x.label}: ${x.count}`}>
+                      <div className="traceDayBar" style={{ height: `${Math.max(8, Math.round((Number(x.count||0)/maxOf(traceData.byDay))*95))}%` }} />
+                      <div className="traceDayLabel">{String(x.label || "").slice(5)}</div>
+                    </div>
+                  )) : <div className="muted">Sin histórico diario suficiente.</div>}
+                </div>
+              </div>
+
+              <div className="tracePanel">
+                <div className="tracePanelTitle">Almacenamiento persistente</div>
+                <div className="trafficWrap" style={{ marginTop: 8 }}>
+                  <div className="trafficInfo" style={{ minWidth: 0 }}>
+                    <div className="trafficPercent">{traceData?.storage?.percent ?? 0}% usado</div>
+                    <div className="trafficState">{storageStatusLabel(traceData?.storage?.status, traceData?.storage?.percent)}</div>
+                    <div className="trafficBar"><div className="trafficBarFill" style={{ width: `${traceData?.storage?.percent ?? 0}%` }} /></div>
+                    <div className="trafficLegend">
+                      <span>Agenda: {traceData?.storage?.details?.agenda ?? 0}</span>
+                      <span>Comunicaciones: {traceData?.storage?.details?.comunicaciones ?? 0}</span>
+                      <span>CVs: {traceData?.storage?.details?.cvs ?? 0}</span>
+                      <span>Trazabilidad: {traceData?.storage?.details?.trazabilidad ?? 0}</span>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="traceStorageMini">
+                  {(traceData.storageHistory || []).length ? traceData.storageHistory.map((x) => (
+                    <div className="traceStorageCol" key={x.day} title={`${x.day}: ${x.percent}% · ${x.used_units} unidades`}>
+                      <div className="traceStorageBar" style={{ height: `${Math.max(8, Math.round(Number(x.percent||0)))}%` }} />
+                      <div className="traceDayLabel">{String(x.day || "").slice(5)}</div>
+                    </div>
+                  )) : <div className="muted">El histórico de almacenamiento se irá consolidando con el uso.</div>}
+                </div>
+              </div>
+            </div>
+
+            <div className="tracePanel" style={{ marginTop: 12 }}>
+              <div className="tracePanelTitle">Histórico por IP</div>
+              <div className="traceTableWrap">
+                <table className="gridTable traceTable">
+                  <thead><tr><th>IP</th><th>Ingresos/eventos</th><th>Último ingreso</th><th>Dispositivo / navegador</th></tr></thead>
+                  <tbody>
+                    {(traceData.topIps || []).length ? traceData.topIps.map((x) => (
+                      <tr key={x.label}>
+                        <td><b>{x.label}</b></td>
+                        <td>{x.count}</td>
+                        <td>{fmtTraceDate(x.lastSeen)}</td>
+                        <td className="traceUa">{x.userAgent || "s/d"}</td>
+                      </tr>
+                    )) : <tr><td colSpan="4" className="muted">Sin datos de IP todavía.</td></tr>}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <div className="tracePanel" style={{ marginTop: 12 }}>
+              <div className="tracePanelTitle">Últimos movimientos</div>
+              <div className="miniList">
+                {(traceData.recent || []).slice(0, 20).map((x) => (
+                  <div className="miniRow" key={x.id}>
+                    <span><b>{x.target}</b> · {x.event_type} · {x.ip || "s/d"}</span>
+                    <b>{fmtTraceDate(x.created_at)}</b>
+                  </div>
+                ))}
+                {!(traceData.recent || []).length ? <div className="muted" style={{ padding: 10 }}>Todavía no hay movimientos.</div> : null}
+              </div>
+            </div>
+
+            <div className="muted" style={{ fontSize: 12 }}>
+              La IP se registra con fines de administración interna, diagnóstico, seguridad y mejora de la experiencia. El tablero es exclusivo del administrador.
+            </div>
+          </>
+        ) : null}
+      </>
+    )}
+  </section>
+)}
+
 {tab === "ajustes" && (
           <section className="card">
             <div className="cardTitle">Ajustes</div>
@@ -4717,19 +5020,19 @@ async function submitSocioForm() {
 
 
 <nav className="bottomNav">
-  <button className={cls("navBtn", tab === "inicio" && "navActive")} onClick={() => setTab("inicio")}>
+  <button className={cls("navBtn", tab === "inicio" && "navActive")} onClick={() => traceNavigate("inicio", "Inicio")}>
     Inicio
   </button>
-  <button className={cls("navBtn", tab === "publicaciones" && "navActive")} onClick={() => setTab("publicaciones")}>
+  <button className={cls("navBtn", tab === "publicaciones" && "navActive")} onClick={() => traceNavigate("publicaciones", "Publicaciones")}>
     Publicaciones
   </button>
-  <button className={cls("navBtn", tab === "proindustrial" && "navActive")} onClick={() => setTab("proindustrial")}>
-    Pro.Industrial
+  <button className={cls("navBtn", tab === "trazabilidad" && "navActive")} onClick={openTraceAccess}>
+    Trazabilidad
   </button>
-  <button className={cls("navBtn", tab === "manual" && "navActive")} onClick={() => setTab("manual")}>
+  <button className={cls("navBtn", tab === "manual" && "navActive")} onClick={() => traceNavigate("manual", "Manual")}>
     Manual
   </button>
-  <button className={cls("navBtn", tab === "ajustes" && "navActive")} onClick={() => setTab("ajustes")}>
+  <button className={cls("navBtn", tab === "ajustes" && "navActive")} onClick={() => traceNavigate("ajustes", "Ajustes")}>
     Ajustes
   </button>
 </nav>
