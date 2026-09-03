@@ -93,7 +93,6 @@ const TRACE_TAB_LABEL = {
   publicaciones: "Publicaciones",
   trazabilidad: "Trazabilidad",
   manual: "Manual",
-  beneficios: "Beneficios",
   agenda: "Agenda",
   comunicacion: "Comunicación al socio",
   mensajes: "Comunicación al administrador",
@@ -222,7 +221,7 @@ export default function App() {
     if (c === "todos" || c === "all") return "";
     return c;
   };
-  const [tab, setTab] = useState("inicio"); // inicio | publicaciones | trazabilidad | manual | beneficios | agenda | bolsa | comunicacion | mensajes | socios | ajustes
+  const [tab, setTab] = useState("inicio"); // inicio | publicaciones | trazabilidad | manual | agenda | bolsa | comunicacion | mensajes | socios | ajustes
 
   // Zoom lock (evita zoom por pellizco y el auto-zoom al escribir en iOS).
   // Se guarda por dispositivo.
@@ -427,7 +426,7 @@ const [memberPwOpen, setMemberPwOpen] = useState(false);
   // UX: overlay al forzar actualización (en algunos celulares tarda y parece que "no hizo nada")
   const [refreshing, setRefreshing] = useState(false);
 
-  // Trazabilidad (v0.36.5)
+  // Trazabilidad
   const [traceDays, setTraceDays] = useState(30);
   const [traceData, setTraceData] = useState(null);
   const [traceBusy, setTraceBusy] = useState(false);
@@ -435,6 +434,7 @@ const [memberPwOpen, setMemberPwOpen] = useState(false);
 
 // Acceso directo: Requerimientos Institucionales (sin clave)
 const REQ_INST_URL = "https://cpf-web.onrender.com/"; // link actual del sistema de requerimientos
+const BENEFITS_URL = "https://beneficios-uic.onrender.com/"; // portal externo oficial de beneficios UIC
 
 // ---------------- Bolsa de Trabajo ----------------
 const [bolsaMode, setBolsaMode] = useState("alta"); // alta | buscar
@@ -1772,7 +1772,7 @@ const quickLinks = [
   // v0.36.0: “Bolsa de trabajo” queda oculto y se reemplaza por acceso directo a Talento PyME.
   { key: "talento_pyme", label: "Talento PyME", href: "https://talento-pyme.onrender.com/", icon: talentoPymeIcon },
 
-  { key: "beneficios", label: "Beneficios", href: "#", onClick: () => setTab("beneficios") },
+  { key: "beneficios", label: "Beneficios", href: BENEFITS_URL },
   { key: "agenda", label: "Agenda", href: "#", onClick: () => setTab("agenda") },
 
   { key: "comunicacion_socio", label: "Comunicación al socio", href: "#", onClick: () => { setTab("comunicacion"); } },
@@ -2413,14 +2413,18 @@ if (!token) {
     setMemberResetErr("");
     const no = String(memberLoginNo || "").trim();
     if (!no) {
-      setMemberResetErr("Ingresá tu Nº de socio para restablecer la clave.");
+      setMemberResetErr("Ingresá tu Nº de socio para identificar la cuenta.");
+      return;
+    }
+    if (!adminToken) {
+      setMemberResetMsg("Por seguridad, el restablecimiento de clave debe solicitarse a Administración UIC.");
       return;
     }
     setMsgsBusy(true);
     try {
       const r = await fetch(`${API_BASE}/member/reset-password`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", "x-admin-token": adminToken },
         body: JSON.stringify({ member_no: parseInt(no, 10) }),
       });
       let j = null;
@@ -2430,8 +2434,7 @@ if (!token) {
         setMemberResetErr(msg);
         return;
       }
-      // No mostramos la clave por defecto por seguridad (se informa por canal oficial).
-      setMemberResetMsg("Clave restablecida a la clave inicial. Si no recordás la clave, contactá a UIC.");
+      setMemberResetMsg("Clave restablecida a la clave inicial por el administrador.");
     } catch (e) {
       setMemberResetErr(e?.message || "Error de red.");
     } finally {
@@ -3511,7 +3514,7 @@ async function submitSocioForm() {
     <div className="manualBody">
 <h3>Objetivo</h3>
 <div className="muted">
-  Esta app PWA centraliza publicaciones, agenda, beneficios y comunicación socio ↔ administrador.
+  Esta app PWA centraliza publicaciones, agenda y comunicación socio ↔ administrador, e integra accesos directos a servicios externos de UIC.
   Además incorpora accesos protegidos para evitar que un no-socio navegue áreas sensibles.
 </div>
 
@@ -3527,7 +3530,7 @@ async function submitSocioForm() {
 <h3>Inicio (accesos rápidos)</h3>
 <ul>
   <li><b>Talento PyME</b>: acceso directo a la plataforma externa de talento y empleo PyME.</li>
-  <li><b>Beneficios</b>: beneficios para socios y comunidad (desde Inicio).</li>
+  <li><b>Beneficios</b>: acceso directo al portal externo oficial de Beneficios UIC.</li>
   <li><b>Agenda</b>: eventos y actividades (desde Inicio).</li>
   <li><b>Requerimientos institucionales</b>: acceso directo al sistema externo de requerimientos.</li>
 </ul>
@@ -3548,7 +3551,7 @@ async function submitSocioForm() {
 
 <h3>Accesos externos</h3>
 <div className="muted">
-  Talento PyME y Requerimientos institucionales se abren como accesos directos externos desde Inicio.
+  Beneficios UIC, Talento PyME y Requerimientos institucionales se abren como accesos directos externos desde Inicio.
 </div>
 
 <h3>Bloquear zoom</h3>
@@ -3560,19 +3563,7 @@ async function submitSocioForm() {
   </section>
 )}
 
-{tab === "beneficios" && (
-          <section className="card">
-            <div className="cardTitle">Beneficios</div>
-            <div className="muted">
-              En el MVP, “Beneficios” se muestra filtrando publicaciones por categoría “beneficios”.
-            </div>
-            <button className="btnPrimary" onClick={() => { setTab("publicaciones"); setCategorySlug("beneficios"); }}>
-              Ver beneficios
-            </button>
-          </section>
-        )}
-
-        {tab === "agenda" && (
+{tab === "agenda" && (
           <section className="card">
             <div className="rowBetween">
               <div className="cardTitle">Agenda</div>
@@ -4038,7 +4029,7 @@ async function submitSocioForm() {
 		                Ingresar
 		              </button>
 		              <button className="btnSecondary" type="button" onClick={memberResetPassword}>
-		                olvidé mi clave
+		                Necesito restablecer mi clave
 		              </button>
 		            </div>
 {memberResetMsg ? <div className="alert" style={{ marginTop: 10 }}>{memberResetMsg}</div> : null}

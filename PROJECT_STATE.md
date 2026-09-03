@@ -1,6 +1,6 @@
 # UIC APP — Estado del proyecto (snapshot)
 
-**Release actual:** 0.36.5
+**Release actual:** 0.37.0
 
 ## Arquitectura
 - **PWA:** React + Vite + PWA (vite-plugin-pwa) — carpeta `uic-app-pwa/`
@@ -12,11 +12,12 @@
 - API: `node index.js` (usa `DATABASE_URL` si existe)
 
 ## Reglas operativas (NO romper)
-1. **Versión única visible**: la PWA lee `APP_VERSION` desde `uic-app-pwa/package.json` (no hardcode).
+1. **Versión única visible**: la PWA deriva versión visible, `cacheId`, `id` y `start_url` desde `uic-app-pwa/package.json`.
 2. Cada release incrementa versión en:
    - `uic-app-pwa/package.json` + `package-lock.json`
    - `uic-app-api/package.json`
 3. Antes de publicar: pasar checklist de QA (ver `RELEASE_CHECKLIST.md`).
+4. El botón **Beneficios** abre el portal externo `https://beneficios-uic.onrender.com/`; no debe volver a usar una pantalla interna.
 
 ## Módulos principales
 - Inicio / Publicaciones (WordPress feed)
@@ -41,3 +42,11 @@
 - Reemplazo de Pro.Industrial por Trazabilidad.
 - Tablero administrativo con métricas de visitas, IPs, botones, pantallas e histórico de almacenamiento.
 - Mejora visual de botones superiores/accesos rápidos.
+
+
+## Cambios v0.37.0
+- Beneficios pasa a acceso externo directo a `https://beneficios-uic.onrender.com/`.
+- Se elimina la pantalla interna obsoleta de Beneficios.
+- Se centraliza el versionado PWA para reducir errores de caché/release.
+- Se protege el reset de contraseña de socios con autorización administrativa.
+- Se actualiza documentación técnica y variables de entorno.

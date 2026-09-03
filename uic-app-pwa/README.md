@@ -1,21 +1,21 @@
-# uic-app-pwa (PWA) — v0.1
+# UIC App PWA — v0.37.0
+
+Frontend React + Vite + PWA de UIC Campana.
 
 ## Requisitos
-- Node.js 18+ recomendado
+- Node.js 18+
 
-## Setup
-1) Copiar `.env.example` a `.env` y completar `VITE_API_BASE` cuando tengas la API en Render.
-2) Instalar dependencias:
-   - `npm install`
-3) Desarrollo:
-   - `npm run dev`
-4) Build:
-   - `npm run build`
+## Desarrollo
+1. Copiar `.env.example` a `.env`.
+2. Configurar `VITE_API_BASE`.
+3. Ejecutar `npm ci`.
+4. Desarrollo: `npm run dev`.
+5. Producción: `npm run build`.
 
-## Íconos
-Están en `public/icons/`:
-- icon-192.png
-- icon-512.png
+## PWA y versionado
+La versión visible, `cacheId`, `id` y `start_url` se derivan de `package.json` para evitar desalineaciones entre releases.
 
-## Nota
-Este MVP consume publicaciones desde WordPress REST API.
+## Accesos externos desde Inicio
+- Beneficios UIC: https://beneficios-uic.onrender.com/
+- Talento PyME: https://talento-pyme.onrender.com/
+- Requerimientos institucionales: https://cpf-web.onrender.com/

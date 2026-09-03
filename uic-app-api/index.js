@@ -198,7 +198,7 @@ let COMMS_STORE = readCommsStore();
 // Bolsa de Trabajo (fallback JSON si no hay DB)
 let JOBS_STORE = { items: [] };
 
-// Trazabilidad de uso de la App UIC (v0.36.5)
+// Trazabilidad de uso de la App UIC
 const TRACE_FILE = (process.env.TRACE_FILE || path.join(__dirname, "data", "trace.json")).trim();
 const TRACE_KEEP = Math.min(Math.max(parseInt(process.env.TRACE_KEEP || "50000", 10) || 50000, 1000), 200000);
 const TRACE_DEFAULT_DAYS = Math.min(Math.max(parseInt(process.env.TRACE_DEFAULT_DAYS || "30", 10) || 30, 1), 365);
@@ -595,7 +595,7 @@ async function initDb() {
     await pool.query(`CREATE INDEX IF NOT EXISTS uic_job_candidates_area_idx ON uic_job_candidates(area_trabajo)`);
     await pool.query(`CREATE INDEX IF NOT EXISTS uic_job_candidates_localidad_idx ON uic_job_candidates(localidad)`);
 
-    // Trazabilidad de uso de la App UIC (v0.36.5)
+    // Trazabilidad de uso de la App UIC
     await pool.query(`
       CREATE TABLE IF NOT EXISTS uic_trace_events (
         id TEXT PRIMARY KEY,
@@ -813,7 +813,10 @@ function requireAccess(req, res, next) {
 // La clave inicial por defecto es: <primer_token_empresa>_2026 (ej: motores_2026, jusa_2026, jm_2026).
 // Se permite cambiar clave (opcional) y resetear a la clave por defecto.
 
-const MEMBER_TOKEN_SECRET = (process.env.MEMBER_TOKEN_SECRET || process.env.EVENT_ADMIN_TOKEN || "dev-member-secret").trim();
+const MEMBER_TOKEN_SECRET = (process.env.MEMBER_TOKEN_SECRET || process.env.EVENT_ADMIN_TOKEN || crypto.randomBytes(32).toString("hex")).trim();
+if (!process.env.MEMBER_TOKEN_SECRET && !process.env.EVENT_ADMIN_TOKEN) {
+  console.warn("⚠️ MEMBER_TOKEN_SECRET no configurado: se usa un secreto efímero; las sesiones de socio caducarán al reiniciar.");
+}
 
 function toAsciiLower(s) {
   return String(s || "")
@@ -2083,7 +2086,7 @@ app.post("/member/change-password", requireMember, async (req, res) => {
   }
 });
 
-app.post("/member/reset-password", async (req, res) => {
+app.post("/member/reset-password", requireAdmin, async (req, res) => {
   try {
     if (__rateLimited(req, res, "member-reset", 10, 10 * 60 * 1000)) return;
     const memberNo = parseInt(req.body?.member_no ?? req.body?.memberNo, 10);
