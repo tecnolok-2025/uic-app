@@ -23,3 +23,12 @@
 - [ ] Header/logo render OK (sin cortes)
 - [ ] Navegación inferior OK
 - [ ] Manual PDF descarga OK
+
+## Agenda / Neon (v0.37.1+)
+- [ ] `/health` responde 200 con `persistence.connected: true`
+- [ ] `/health` muestra `agenda.protectedFromFallback: true`
+- [ ] Agenda muestra eventos existentes después de redeploy
+- [ ] Simular DB no disponible: Agenda muestra aviso y NO calendario vacío
+- [ ] Con DB caída, alta/edición/borrado devuelve 503 y NO escribe JSON local
+- [ ] Restaurar DB: la conexión se recupera automáticamente sin redeploy
+- [ ] Confirmar que los eventos fuera de la ventana visual no se eliminan de Neon

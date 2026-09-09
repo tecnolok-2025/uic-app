@@ -883,3 +883,16 @@ a{color:inherit}
   .traceKpiGrid{grid-template-columns:1fr}
   .quickTile{font-size:12.5px;padding:11px 7px}
 }
+
+/* v0.37.1 — estado seguro de Agenda cuando Neon no está disponible */
+.agendaUnavailable{
+  margin:12px 0 14px;
+  padding:14px;
+  border-radius:14px;
+  border:1px solid rgba(255,190,80,.55);
+  background:rgba(255,166,0,.10);
+  color:var(--text);
+  line-height:1.4;
+}
+.agendaUnavailableTitle{font-weight:900;font-size:16px;margin-bottom:5px}
+.agendaUnavailableDetail{color:var(--muted);font-size:12px;margin:7px 0 10px;word-break:break-word}

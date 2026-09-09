@@ -272,6 +272,68 @@ let MEMBER_CREDS_STORE = null;
 let MESSAGES_STORE = null;
 let dbReady = false;
 let pool = null;
+let dbLastError = "";
+let dbLastOkAt = null;
+let dbLastAttemptAt = null;
+
+// v0.37.1: en Render/producción la persistencia externa es obligatoria para Agenda.
+// Nunca se debe confundir una falla de Neon con una agenda vacía.
+const STRICT_DB_PERSISTENCE = String(
+  process.env.STRICT_DB_PERSISTENCE ?? "true"
+).trim().toLowerCase() !== "false";
+const DB_RETRY_MS = Math.max(parseInt(process.env.DB_RETRY_MS || "30000", 10) || 30000, 5000);
+
+function safeDbIdentity() {
+  if (!DATABASE_URL) return { configured: false, host: "", database: "", user: "" };
+  try {
+    const u = new URL(DATABASE_URL);
+    return {
+      configured: true,
+      host: u.hostname || "",
+      database: (u.pathname || "").replace(/^\//, ""),
+      user: decodeURIComponent(u.username || ""),
+    };
+  } catch (_) {
+    return { configured: true, host: "URL inválida", database: "", user: "" };
+  }
+}
+
+function markDbDown(err, context = "DB") {
+  dbReady = false;
+  dbLastError = String(err?.message || err || "Error de conexión");
+  console.log(`⚠️ ${context}: PostgreSQL/Neon no disponible: ${dbLastError}`);
+}
+
+async function ensureDbConnection() {
+  dbLastAttemptAt = new Date().toISOString();
+  if (!DATABASE_URL || !pool) {
+    dbReady = false;
+    dbLastError = !DATABASE_URL ? "DATABASE_URL no configurada" : "Pool PostgreSQL no inicializado";
+    return false;
+  }
+  try {
+    await pool.query("SELECT 1");
+    const recovered = !dbReady;
+    dbReady = true;
+    dbLastError = "";
+    dbLastOkAt = new Date().toISOString();
+    if (recovered) console.log("✅ PostgreSQL/Neon reconectado automáticamente.");
+    return true;
+  } catch (e) {
+    markDbDown(e, "ensureDbConnection");
+    return false;
+  }
+}
+
+function dbUnavailableResponse(res, area = "Agenda") {
+  return res.status(503).json({
+    ok: false,
+    code: "database_unavailable",
+    error: `${area} temporalmente no disponible. La información no fue eliminada.`,
+    message: `${area} temporalmente no disponible. La información no fue eliminada.`,
+    database: { configured: Boolean(DATABASE_URL), connected: false },
+  });
+}
 
 // Fallback JSON para socios (si no hay DB)
 const SOCIOS_FILE = (process.env.SOCIOS_FILE || path.join(__dirname, "data", "socios.json")).trim();
@@ -472,15 +534,24 @@ function getSocioDefaultsFromSeed(seed) {
 }
 
 async function initDb() {
-  if (!DATABASE_URL) return;
+  dbLastAttemptAt = new Date().toISOString();
+  if (!DATABASE_URL) {
+    dbReady = false;
+    dbLastError = "DATABASE_URL no configurada";
+    console.log("⚠️ DATABASE_URL no configurada.");
+    return false;
+  }
   try {
-    pool = new Pool({
-      connectionString: DATABASE_URL,
-      ssl: DB_SSL ? { rejectUnauthorized: false } : false,
-      max: 5,
-      idleTimeoutMillis: 30000,
-      connectionTimeoutMillis: 10000,
-    });
+    if (!pool) {
+      pool = new Pool({
+        connectionString: DATABASE_URL,
+        ssl: DB_SSL ? { rejectUnauthorized: false } : false,
+        max: 5,
+        idleTimeoutMillis: 30000,
+        connectionTimeoutMillis: 10000,
+      });
+      pool.on("error", (err) => markDbDown(err, "Pool PostgreSQL"));
+    }
     await pool.query("SELECT 1");
 
     await pool.query(`
@@ -628,11 +699,15 @@ async function initDb() {
       )
     `);
 
-dbReady = true;
-    console.log("✅ DB externa habilitada (DATABASE_URL). Persistencia OK.");
+    dbReady = true;
+    dbLastError = "";
+    dbLastOkAt = new Date().toISOString();
+    const id = safeDbIdentity();
+    console.log(`✅ DB externa habilitada. host=${id.host || "s/d"} db=${id.database || "s/d"} user=${id.user || "s/d"}`);
+    return true;
   } catch (e) {
-    dbReady = false;
-    console.log("⚠️ DB externa no disponible, usando JSON local:", e?.message || e);
+    markDbDown(e, "initDb");
+    return false;
   }
 }
 
@@ -734,10 +809,9 @@ async function applySocioOverrides() {
 async function pruneDb() {
   const w = agendaWindowBounds();
 
-  // Fallback JSON: prune siempre
+  // v0.37.1: la ventana de Agenda es sólo de visualización. Nunca borrar eventos por antigüedad.
   try {
-    EVENTS_STORE.events = (EVENTS_STORE.events || []).filter((ev) => ev.date >= w.start && ev.date <= w.end);
-    // orden ascendente por fecha
+    EVENTS_STORE.events = Array.isArray(EVENTS_STORE.events) ? EVENTS_STORE.events : [];
     EVENTS_STORE.events.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
     // COMMS fallback: mantener últimas COMMS_KEEP
     COMMS_STORE.items = (COMMS_STORE.items || []).slice(0, COMMS_KEEP);
@@ -746,8 +820,7 @@ async function pruneDb() {
   if (!dbReady) return;
 
   try {
-    // Agenda: mantener ventana móvil (-12 meses -> +12 meses)
-    await pool.query("DELETE FROM uic_events WHERE date < $1 OR date > $2", [w.start, w.end]);
+    // Agenda NO se depura: preservación histórica completa en Neon.
 
     // Comms: mantener últimas COMMS_KEEP
     await pool.query(
@@ -1234,7 +1307,38 @@ app.get("/", (req, res) => {
   );
 });
 
-app.get("/health", (req, res) => res.json({ ok: true }));
+app.get("/health", async (req, res) => {
+  const connected = await ensureDbConnection();
+  const identity = safeDbIdentity();
+  let agendaCount = null;
+  if (connected) {
+    try {
+      const r = await pool.query("SELECT COUNT(*)::int AS count FROM uic_events");
+      agendaCount = Number(r.rows?.[0]?.count || 0);
+    } catch (e) {
+      markDbDown(e, "health/agenda-count");
+    }
+  }
+  const ok = dbReady || !STRICT_DB_PERSISTENCE;
+  const payload = {
+    ok,
+    apiVersion: API_VERSION,
+    build: API_BUILD_STAMP,
+    persistence: {
+      strict: STRICT_DB_PERSISTENCE,
+      configured: Boolean(DATABASE_URL),
+      connected: Boolean(dbReady),
+      host: identity.host,
+      database: identity.database,
+      user: identity.user,
+      lastOkAt: dbLastOkAt,
+      lastAttemptAt: dbLastAttemptAt,
+      lastError: dbReady ? "" : dbLastError,
+    },
+    agenda: { storage: "postgresql", count: agendaCount, protectedFromFallback: STRICT_DB_PERSISTENCE },
+  };
+  return res.status(ok ? 200 : 503).json(payload);
+});
 app.get("/version", (req, res) => res.json({ ok: true, apiVersion: API_VERSION, build: API_BUILD_STAMP }));
 
 /* ------------------------- WordPress (posts) ---------------------------- */
@@ -1307,8 +1411,8 @@ app.get("/wp/posts", async (req, res) => {
 
 app.get("/events/meta", async (req, res) => {
   const w = agendaWindowBounds();
+  if (STRICT_DB_PERSISTENCE && !(await ensureDbConnection())) return dbUnavailableResponse(res, "Agenda");
   try {
-    await pruneDb();
     if (dbReady) {
       const r = await pool.query(
         "SELECT COUNT(*)::int AS count, MAX(updated_at) AS updated_at FROM uic_events WHERE date >= $1 AND date <= $2",
@@ -1316,13 +1420,13 @@ app.get("/events/meta", async (req, res) => {
       );
       const count = r.rows?.[0]?.count || 0;
       const updatedAt = r.rows?.[0]?.updated_at ? new Date(r.rows[0].updated_at).toISOString() : "";
-      return res.json({ updatedAt, count });
+      return res.json({ updatedAt, count, storage: "postgresql" });
     }
   } catch (e) {
-    console.log("⚠️ DB events/meta error, fallback JSON:", e?.message || e);
+    markDbDown(e, "DB events/meta");
+    if (STRICT_DB_PERSISTENCE) return dbUnavailableResponse(res, "Agenda");
   }
-  // fallback JSON (ya pruned)
-  return res.json({ updatedAt: EVENTS_STORE.updatedAt, count: (EVENTS_STORE.events || []).length });
+  return res.json({ updatedAt: EVENTS_STORE.updatedAt, count: (EVENTS_STORE.events || []).length, storage: "local-fallback" });
 });
 
 app.get("/events", async (req, res) => {
@@ -1330,18 +1434,15 @@ app.get("/events", async (req, res) => {
   const qTo = isoDateOnly((req.query.to || "").toString().trim());
   const { from, to, window } = clampRangeToWindow(qFrom, qTo);
 
-  if (from && to && from > to) {
-    return res.json({ updatedAt: EVENTS_STORE.updatedAt, items: [] });
-  }
+  if (STRICT_DB_PERSISTENCE && !(await ensureDbConnection())) return dbUnavailableResponse(res, "Agenda");
+  if (from && to && from > to) return res.json({ updatedAt: "", items: [], storage: dbReady ? "postgresql" : "local-fallback" });
 
   try {
-    await pruneDb();
     if (dbReady) {
       const r = await pool.query(
         "SELECT id, to_char(date,'YYYY-MM-DD') AS date, title, COALESCE(description,'') AS description, highlight, created_at, updated_at FROM uic_events WHERE date >= $1 AND date <= $2 ORDER BY date ASC",
         [from, to]
       );
-
       const items = (r.rows || []).map((x) => ({
         id: x.id,
         date: x.date,
@@ -1351,22 +1452,17 @@ app.get("/events", async (req, res) => {
         createdAt: x.created_at ? new Date(x.created_at).toISOString() : "",
         updatedAt: x.updated_at ? new Date(x.updated_at).toISOString() : "",
       }));
-
       const meta = await pool.query("SELECT MAX(updated_at) AS updated_at FROM uic_events WHERE date >= $1 AND date <= $2", [window.start, window.end]);
       const updatedAt = meta.rows?.[0]?.updated_at ? new Date(meta.rows[0].updated_at).toISOString() : "";
-
-      return res.json({ updatedAt, items });
+      return res.json({ updatedAt, items, storage: "postgresql" });
     }
   } catch (e) {
-    console.log("⚠️ DB events/list error, fallback JSON:", e?.message || e);
+    markDbDown(e, "DB events/list");
+    if (STRICT_DB_PERSISTENCE) return dbUnavailableResponse(res, "Agenda");
   }
 
-  // fallback JSON (ya pruned)
-  const items = (EVENTS_STORE.events || [])
-    .filter((ev) => inRange(ev.date, from, to))
-    .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
-
-  return res.json({ updatedAt: EVENTS_STORE.updatedAt, items });
+  const items = (EVENTS_STORE.events || []).filter((ev) => inRange(ev.date, from, to)).sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+  return res.json({ updatedAt: EVENTS_STORE.updatedAt, items, storage: "local-fallback" });
 });
 
 app.post("/events", requireAdmin, async (req, res) => {
@@ -1374,107 +1470,93 @@ app.post("/events", requireAdmin, async (req, res) => {
   const title = (req.body?.title || "").toString().trim();
   const description = (req.body?.description || "").toString().trim();
   const highlight = Boolean(req.body?.highlight);
-
   if (!date) return res.status(400).json({ error: "date inválida (formato: YYYY-MM-DD)" });
-  if (!isWithinWindow(date)) return res.status(400).json({ error: "date fuera de la ventana móvil (mes actual -> +12 meses)" });
+  if (!isWithinWindow(date)) return res.status(400).json({ error: "date fuera de la ventana móvil (-12 a +12 meses)" });
   if (!title) return res.status(400).json({ error: "title requerido" });
+  if (STRICT_DB_PERSISTENCE && !(await ensureDbConnection())) return dbUnavailableResponse(res, "Agenda");
 
   const now = new Date().toISOString();
   const id = `ev_${Math.random().toString(36).slice(2, 10)}${Date.now().toString(36)}`;
-
   try {
     if (dbReady) {
       await pool.query(
         "INSERT INTO uic_events(id, date, title, description, highlight, created_at, updated_at) VALUES($1,$2,$3,$4,$5,NOW(),NOW())",
         [id, date, title, description, highlight]
       );
-      await pruneDb();
-      return res.status(201).json({ ok: true, item: { id, date, title, description, highlight, createdAt: now, updatedAt: now }, updatedAt: now });
+      return res.status(201).json({ ok: true, item: { id, date, title, description, highlight, createdAt: now, updatedAt: now }, updatedAt: now, storage: "postgresql" });
     }
   } catch (e) {
-    console.log("⚠️ DB events/create error, fallback JSON:", e?.message || e);
+    markDbDown(e, "DB events/create");
+    if (STRICT_DB_PERSISTENCE) return dbUnavailableResponse(res, "Agenda");
   }
-
   const ev = { id, date, title, description, highlight, createdAt: now, updatedAt: now };
   EVENTS_STORE.events.unshift(ev);
   touchEventsStore();
-  return res.status(201).json({ ok: true, item: ev, updatedAt: EVENTS_STORE.updatedAt });
+  return res.status(201).json({ ok: true, item: ev, updatedAt: EVENTS_STORE.updatedAt, storage: "local-fallback" });
 });
 
 app.put("/events/:id", requireAdmin, async (req, res) => {
   const id = (req.params.id || "").toString();
-
   const date = req.body?.date ? isoDateOnly(req.body.date) : null;
   const title = req.body?.title !== undefined ? (req.body.title || "").toString().trim() : null;
   const description = req.body?.description !== undefined ? (req.body.description || "").toString().trim() : null;
   const highlight = req.body?.highlight !== undefined ? Boolean(req.body.highlight) : null;
+  if (STRICT_DB_PERSISTENCE && !(await ensureDbConnection())) return dbUnavailableResponse(res, "Agenda");
 
   try {
     if (dbReady) {
-      // Trae actual para completar campos omitidos
       const cur = await pool.query("SELECT id, to_char(date,'YYYY-MM-DD') AS date, title, COALESCE(description,'') AS description, highlight FROM uic_events WHERE id=$1", [id]);
       if (!cur.rows?.length) return res.status(404).json({ error: "Evento no encontrado" });
       const base = cur.rows[0];
-
       const newDate = date || base.date;
       const newTitle = title !== null ? title : base.title;
       const newDesc = description !== null ? description : (base.description || "");
       const newHighlight = highlight !== null ? highlight : Boolean(base.highlight);
-
       if (!newDate) return res.status(400).json({ error: "date inválida (formato: YYYY-MM-DD)" });
-  if (!isWithinWindow(newDate)) return res.status(400).json({ error: "date fuera de la ventana móvil (mes actual -> +12 meses)" });
-      if (!isWithinWindow(newDate)) return res.status(400).json({ error: "date fuera de la ventana móvil (mes actual -> +12 meses)" });
+      if (!isWithinWindow(newDate)) return res.status(400).json({ error: "date fuera de la ventana móvil (-12 a +12 meses)" });
       if (!newTitle) return res.status(400).json({ error: "title requerido" });
-
       const now = new Date().toISOString();
-      await pool.query(
-        "UPDATE uic_events SET date=$2, title=$3, description=$4, highlight=$5, updated_at=NOW() WHERE id=$1",
-        [id, newDate, newTitle, newDesc, newHighlight]
-      );
-      await pruneDb();
-      return res.json({ ok: true, item: { id, date: newDate, title: newTitle, description: newDesc, highlight: newHighlight, updatedAt: now }, updatedAt: now });
+      await pool.query("UPDATE uic_events SET date=$2, title=$3, description=$4, highlight=$5, updated_at=NOW() WHERE id=$1", [id, newDate, newTitle, newDesc, newHighlight]);
+      return res.json({ ok: true, item: { id, date: newDate, title: newTitle, description: newDesc, highlight: newHighlight, updatedAt: now }, updatedAt: now, storage: "postgresql" });
     }
   } catch (e) {
-    console.log("⚠️ DB events/update error, fallback JSON:", e?.message || e);
+    markDbDown(e, "DB events/update");
+    if (STRICT_DB_PERSISTENCE) return dbUnavailableResponse(res, "Agenda");
   }
 
   const idx = (EVENTS_STORE.events || []).findIndex((x) => x.id === id);
   if (idx < 0) return res.status(404).json({ error: "Evento no encontrado" });
-
   const newDate = date || EVENTS_STORE.events[idx].date;
   const newTitle = title !== null ? title : EVENTS_STORE.events[idx].title;
   const newDesc = description !== null ? description : EVENTS_STORE.events[idx].description;
   const newHighlight = highlight !== null ? highlight : EVENTS_STORE.events[idx].highlight;
-
   if (!newDate) return res.status(400).json({ error: "date inválida (formato: YYYY-MM-DD)" });
-  if (!isWithinWindow(newDate)) return res.status(400).json({ error: "date fuera de la ventana móvil (mes actual -> +12 meses)" });
+  if (!isWithinWindow(newDate)) return res.status(400).json({ error: "date fuera de la ventana móvil (-12 a +12 meses)" });
   if (!newTitle) return res.status(400).json({ error: "title requerido" });
-
   EVENTS_STORE.events[idx] = { ...EVENTS_STORE.events[idx], date: newDate, title: newTitle, description: newDesc, highlight: newHighlight, updatedAt: new Date().toISOString() };
   touchEventsStore();
-  return res.json({ ok: true, item: EVENTS_STORE.events[idx], updatedAt: EVENTS_STORE.updatedAt });
+  return res.json({ ok: true, item: EVENTS_STORE.events[idx], updatedAt: EVENTS_STORE.updatedAt, storage: "local-fallback" });
 });
 
 app.delete("/events/:id", requireAdmin, async (req, res) => {
   const id = (req.params.id || "").toString();
-
+  if (STRICT_DB_PERSISTENCE && !(await ensureDbConnection())) return dbUnavailableResponse(res, "Agenda");
   try {
     if (dbReady) {
       const r = await pool.query("DELETE FROM uic_events WHERE id=$1", [id]);
       if (!r.rowCount) return res.status(404).json({ error: "Evento no encontrado" });
       const now = new Date().toISOString();
-      await pruneDb();
-      return res.json({ ok: true, updatedAt: now });
+      return res.json({ ok: true, updatedAt: now, storage: "postgresql" });
     }
   } catch (e) {
-    console.log("⚠️ DB events/delete error, fallback JSON:", e?.message || e);
+    markDbDown(e, "DB events/delete");
+    if (STRICT_DB_PERSISTENCE) return dbUnavailableResponse(res, "Agenda");
   }
-
   const before = EVENTS_STORE.events.length;
   EVENTS_STORE.events = (EVENTS_STORE.events || []).filter((x) => x.id !== id);
   if (EVENTS_STORE.events.length === before) return res.status(404).json({ error: "Evento no encontrado" });
   touchEventsStore();
-  return res.json({ ok: true, updatedAt: EVENTS_STORE.updatedAt });
+  return res.json({ ok: true, updatedAt: EVENTS_STORE.updatedAt, storage: "local-fallback" });
 });
 
 /* -------------------- Comunicación al socio (COMMS) --------------------- */
@@ -3094,16 +3176,38 @@ app.post("/subscribe", (req, res) => {
 
 /* ----------------------------- Start ----------------------------------- */
 
+async function runDbMaintenance() {
+  if (!dbReady) return;
+  try {
+    await seedSociosIfEmpty();
+    await applySocioOverrides();
+    await pruneDb();
+  } catch (e) {
+    markDbDown(e, "runDbMaintenance");
+  }
+}
+
 async function start() {
   await initDb();
-  await seedSociosIfEmpty();
-  await applySocioOverrides();
-  await pruneDb();
+  if (dbReady) await runDbMaintenance();
+  else if (STRICT_DB_PERSISTENCE) console.log("🛡️ Modo persistencia estricta activo: Agenda NO usará JSON local mientras Neon esté caído.");
 
   app.listen(PORT, () => {
     console.log(`UIC API running on :${PORT}`);
     console.log(`WP_MODE=${WP_MODE} WP_SITE_BASE=${WP_SITE_BASE}`);
+    console.log(`STRICT_DB_PERSISTENCE=${STRICT_DB_PERSISTENCE} DB_RETRY_MS=${DB_RETRY_MS}`);
   });
+
+  const timer = setInterval(async () => {
+    if (!DATABASE_URL) return;
+    if (dbReady) {
+      await ensureDbConnection();
+      return;
+    }
+    const recovered = await initDb();
+    if (recovered) await runDbMaintenance();
+  }, DB_RETRY_MS);
+  timer.unref?.();
 }
 
 start();

@@ -1844,6 +1844,7 @@ function agendaMaxBase() {
 
 async function loadAgendaForTwoMonths(baseDate) {
   if (!canUseApi) return;
+  setAgendaError("");
   const base = startOfMonth(baseDate);
   const min = agendaMinBase();
   const max = agendaMaxBase();
@@ -3575,9 +3576,19 @@ async function submitSocioForm() {
               <>
                 <div className="muted" style={{ marginBottom: 8 }}>
                   Se muestran <b>dos meses</b>. Podés avanzar/retroceder de a 2 meses.
-                  Ventana móvil: desde el <b>mes actual</b> hasta <b>12 meses hacia adelante</b> (lo anterior se borra automáticamente).
+                  Ventana de consulta: hasta <b>12 meses anteriores</b> y <b>12 meses hacia adelante</b>.
+                  Los eventos guardados en Neon <b>no se eliminan automáticamente</b>.
                 </div>
 
+                {agendaError ? (
+                  <div className="agendaUnavailable" role="alert">
+                    <div className="agendaUnavailableTitle">Agenda temporalmente no disponible</div>
+                    <div>La información <b>no fue eliminada</b>. La App no puede acceder en este momento a la base de datos de Neon.</div>
+                    <div className="agendaUnavailableDetail">{agendaError}</div>
+                    <button className="btnPrimary" onClick={() => loadAgendaForTwoMonths(agendaBase)}>Reintentar conexión</button>
+                  </div>
+                ) : (
+                <>
                 <div className="pagerRow" style={{ marginTop: 0 }}>
                   <button
                     className="btnSecondary"
@@ -3646,6 +3657,8 @@ async function submitSocioForm() {
                     );
                   })()}
                 </div>
+                </>
+                )}
                 {/* Comunicación al socio */}
                 <div style={{ marginTop: 14 }}>
                   <button className="btnPrimary" onClick={() => setTab("comunicacion")}>
@@ -3656,7 +3669,7 @@ async function submitSocioForm() {
 
 
 
-                {selectedDate && (
+                {!agendaError && selectedDate && (
                   <div className="cardSub" style={{ marginTop: 12 }}>
                     <div className="rowBetween" style={{ gap: 8, alignItems: "center" }}>
                       <div>

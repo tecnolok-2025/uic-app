@@ -1,6 +1,6 @@
 # UIC APP — Estado del proyecto (snapshot)
 
-**Release actual:** 0.37.0
+**Release actual:** 0.37.1
 
 ## Arquitectura
 - **PWA:** React + Vite + PWA (vite-plugin-pwa) — carpeta `uic-app-pwa/`
@@ -50,3 +50,13 @@
 - Se centraliza el versionado PWA para reducir errores de caché/release.
 - Se protege el reset de contraseña de socios con autorización administrativa.
 - Se actualiza documentación técnica y variables de entorno.
+
+
+## Cambios v0.37.1 — Agenda / Neon (corrección definitiva)
+- Neon/PostgreSQL pasa a ser obligatorio para Agenda en Render/producción.
+- Se elimina el fallback silencioso a JSON local para lectura y escritura de Agenda.
+- Si Neon no responde, la API devuelve HTTP 503 y la PWA informa que la Agenda está temporalmente no disponible y que los datos no fueron eliminados.
+- Reconexión automática a Neon cada 30 segundos (configurable con `DB_RETRY_MS`).
+- `/health` verifica realmente PostgreSQL, informa host/base/usuario sin exponer contraseña y cuenta total de eventos.
+- Los eventos históricos dejan de borrarse automáticamente por estar fuera de la ventana visual. La ventana es sólo de consulta.
+- `STRICT_DB_PERSISTENCE=true` recomendado/obligatorio en Render.
