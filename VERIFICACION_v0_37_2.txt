@@ -1,0 +1,19 @@
+UIC APP v0.37.2 — VERIFICACIÓN
+
+Archivos base v0.37.1: 38
+Archivos v0.37.2: 45
+Archivos base faltantes: 0
+NINGUNO
+
+Archivos nuevos principales:
+- uic-data-bridge/ (servicio interno)
+- CHANGELOG_v0_37_2.md
+- AUDITORIA_v0_37_2_DUAL_NEON.md
+- INSTALACION_v0_37_2_DUAL_NEON.md
+
+api_version: OK
+pwa_version: OK
+secondary_env: OK
+snapshot_guard: OK
+bridge_meta: OK
+bridge_service: OK

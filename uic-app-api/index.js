@@ -232,6 +232,7 @@ let TRACE_STORE = readTraceStore();
 // En Render Free, la memoria y el filesystem local pueden resetearse cuando la instancia duerme o se redeploya.
 // Si configurás DATABASE_URL, se usa una DB externa (Postgres) para persistir agenda y comunicaciones.
 const DATABASE_URL = String(process.env.DATABASE_URL || process.env.POSTGRES_URL || process.env.PG_URL || "").trim();
+const SECONDARY_DATABASE_URL = String(process.env.SECONDARY_DATABASE_URL || "").trim();
 const DB_SSL = String(process.env.DATABASE_SSL || "true").trim().toLowerCase() !== "false";
 
 // Retención (ajustable por env). Por defecto: agenda -12/+12 meses; comunicaciones: hasta 2000 últimas.
@@ -275,18 +276,24 @@ let pool = null;
 let dbLastError = "";
 let dbLastOkAt = null;
 let dbLastAttemptAt = null;
+let secondaryPool = null;
+let secondaryReady = false;
+let secondaryLastError = "";
+let secondaryLastOkAt = null;
+let secondaryLastAttemptAt = null;
 
-// v0.37.1: en Render/producción la persistencia externa es obligatoria para Agenda.
+// v0.37.2: en Render/producción la persistencia externa es obligatoria para Agenda.
 // Nunca se debe confundir una falla de Neon con una agenda vacía.
 const STRICT_DB_PERSISTENCE = String(
   process.env.STRICT_DB_PERSISTENCE ?? "true"
 ).trim().toLowerCase() !== "false";
 const DB_RETRY_MS = Math.max(parseInt(process.env.DB_RETRY_MS || "30000", 10) || 30000, 5000);
 
-function safeDbIdentity() {
-  if (!DATABASE_URL) return { configured: false, host: "", database: "", user: "" };
+
+function safeDbIdentityFrom(url) {
+  if (!url) return { configured: false, host: "", database: "", user: "" };
   try {
-    const u = new URL(DATABASE_URL);
+    const u = new URL(url);
     return {
       configured: true,
       host: u.hostname || "",
@@ -297,6 +304,184 @@ function safeDbIdentity() {
     return { configured: true, host: "URL inválida", database: "", user: "" };
   }
 }
+
+function markSecondaryDown(err, context = "DB secundaria") {
+  secondaryReady = false;
+  secondaryLastError = String(err?.message || err || "Error de conexión");
+  console.log(`⚠️ ${context}: PostgreSQL/Neon secundaria no disponible: ${secondaryLastError}`);
+}
+
+async function ensureSecondaryConnection() {
+  secondaryLastAttemptAt = new Date().toISOString();
+  if (!SECONDARY_DATABASE_URL || !secondaryPool) {
+    secondaryReady = false;
+    secondaryLastError = !SECONDARY_DATABASE_URL ? "SECONDARY_DATABASE_URL no configurada" : "Pool secundario no inicializado";
+    return false;
+  }
+  try {
+    await secondaryPool.query("SELECT 1");
+    const recovered = !secondaryReady;
+    secondaryReady = true;
+    secondaryLastError = "";
+    secondaryLastOkAt = new Date().toISOString();
+    if (recovered) console.log("✅ Neon secundaria conectada/reconectada.");
+    return true;
+  } catch (e) {
+    markSecondaryDown(e, "ensureSecondaryConnection");
+    return false;
+  }
+}
+
+async function secondarySnapshotReady() {
+  if (!(await ensureSecondaryConnection())) return false;
+  try {
+    const r = await secondaryPool.query("SELECT last_success_at, events_count FROM uic_bridge_meta WHERE singleton=TRUE LIMIT 1");
+    return Boolean(r.rows?.[0]?.last_success_at);
+  } catch (_) { return false; }
+}
+
+async function initSecondaryDb() {
+  secondaryLastAttemptAt = new Date().toISOString();
+  if (!SECONDARY_DATABASE_URL) {
+    secondaryReady = false;
+    secondaryLastError = "SECONDARY_DATABASE_URL no configurada";
+    console.log("ℹ️ SECONDARY_DATABASE_URL no configurada: continuidad dual desactivada.");
+    return false;
+  }
+  try {
+    if (!secondaryPool) {
+      secondaryPool = new Pool({
+        connectionString: SECONDARY_DATABASE_URL,
+        ssl: DB_SSL ? { rejectUnauthorized: false } : false,
+        max: 3,
+        idleTimeoutMillis: 30000,
+        connectionTimeoutMillis: 10000,
+      });
+      secondaryPool.on("error", (err) => markSecondaryDown(err, "Pool secundario"));
+    }
+    await secondaryPool.query("SELECT 1");
+    await secondaryPool.query(`
+      CREATE TABLE IF NOT EXISTS uic_events (
+        id TEXT PRIMARY KEY,
+        date DATE NOT NULL,
+        title TEXT NOT NULL,
+        description TEXT DEFAULT '',
+        highlight BOOLEAN NOT NULL DEFAULT FALSE,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `);
+    await secondaryPool.query(`CREATE INDEX IF NOT EXISTS uic_events_date_idx ON uic_events(date)`);
+    await secondaryPool.query(`
+      CREATE TABLE IF NOT EXISTS uic_bridge_meta (
+        singleton BOOLEAN PRIMARY KEY DEFAULT TRUE CHECK (singleton),
+        last_success_at TIMESTAMPTZ,
+        events_count INT NOT NULL DEFAULT 0,
+        comms_count INT NOT NULL DEFAULT 0,
+        socios_count INT NOT NULL DEFAULT 0
+      )
+    `);
+    await secondaryPool.query(`
+      CREATE TABLE IF NOT EXISTS uic_comms (
+        id TEXT PRIMARY KEY,
+        title TEXT NOT NULL,
+        message TEXT NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `);
+    await secondaryPool.query(`
+      CREATE TABLE IF NOT EXISTS uic_socios (
+        id TEXT PRIMARY KEY,
+        member_no INT NOT NULL UNIQUE,
+        company_name TEXT NOT NULL,
+        category TEXT NOT NULL,
+        expertise TEXT DEFAULT '',
+        website_url TEXT DEFAULT '',
+        social_url TEXT DEFAULT '',
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `);
+    secondaryReady = true;
+    secondaryLastError = "";
+    secondaryLastOkAt = new Date().toISOString();
+    console.log("✅ Neon secundaria lista para continuidad de lectura de Agenda.");
+    return true;
+  } catch (e) {
+    markSecondaryDown(e, "initSecondaryDb");
+    return false;
+  }
+}
+
+async function mirrorEventToSecondary(item) {
+  if (!(await ensureSecondaryConnection())) return false;
+  try {
+    await secondaryPool.query(
+      `INSERT INTO uic_events(id,date,title,description,highlight,created_at,updated_at)
+       VALUES($1,$2,$3,$4,$5,COALESCE($6::timestamptz,NOW()),COALESCE($7::timestamptz,NOW()))
+       ON CONFLICT(id) DO UPDATE SET date=EXCLUDED.date,title=EXCLUDED.title,description=EXCLUDED.description,
+       highlight=EXCLUDED.highlight,updated_at=EXCLUDED.updated_at`,
+      [item.id, item.date, item.title, item.description || "", Boolean(item.highlight), item.createdAt || null, item.updatedAt || null]
+    );
+    return true;
+  } catch (e) {
+    markSecondaryDown(e, "mirrorEventToSecondary");
+    return false;
+  }
+}
+
+async function deleteEventFromSecondary(id) {
+  if (!(await ensureSecondaryConnection())) return false;
+  try { await secondaryPool.query("DELETE FROM uic_events WHERE id=$1", [id]); return true; }
+  catch (e) { markSecondaryDown(e, "deleteEventFromSecondary"); return false; }
+}
+
+async function syncCriticalToSecondary() {
+  if (!dbReady || !(await ensureSecondaryConnection())) return { ok: false, reason: "database_unavailable" };
+  const result = { events: 0, comms: 0, socios: 0 };
+  try {
+    const er = await pool.query("SELECT id,to_char(date,'YYYY-MM-DD') AS date,title,COALESCE(description,'') AS description,highlight,created_at,updated_at FROM uic_events ORDER BY date ASC");
+    for (const x of er.rows || []) {
+      await secondaryPool.query(
+        `INSERT INTO uic_events(id,date,title,description,highlight,created_at,updated_at) VALUES($1,$2,$3,$4,$5,$6,$7)
+         ON CONFLICT(id) DO UPDATE SET date=EXCLUDED.date,title=EXCLUDED.title,description=EXCLUDED.description,highlight=EXCLUDED.highlight,updated_at=EXCLUDED.updated_at`,
+        [x.id,x.date,x.title,x.description||"",Boolean(x.highlight),x.created_at,x.updated_at]
+      );
+      result.events++;
+    }
+    const cr = await pool.query("SELECT id,title,message,created_at FROM uic_comms ORDER BY created_at ASC");
+    for (const x of cr.rows || []) {
+      await secondaryPool.query(
+        `INSERT INTO uic_comms(id,title,message,created_at) VALUES($1,$2,$3,$4)
+         ON CONFLICT(id) DO UPDATE SET title=EXCLUDED.title,message=EXCLUDED.message,created_at=EXCLUDED.created_at`,
+        [x.id,x.title,x.message,x.created_at]
+      );
+      result.comms++;
+    }
+    const sr = await pool.query("SELECT id,member_no,company_name,category,COALESCE(expertise,'') AS expertise,COALESCE(website_url,'') AS website_url,COALESCE(social_url,'') AS social_url,created_at,updated_at FROM uic_socios ORDER BY member_no ASC");
+    for (const x of sr.rows || []) {
+      await secondaryPool.query(
+        `INSERT INTO uic_socios(id,member_no,company_name,category,expertise,website_url,social_url,created_at,updated_at)
+         VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)
+         ON CONFLICT(id) DO UPDATE SET member_no=EXCLUDED.member_no,company_name=EXCLUDED.company_name,category=EXCLUDED.category,
+         expertise=EXCLUDED.expertise,website_url=EXCLUDED.website_url,social_url=EXCLUDED.social_url,updated_at=EXCLUDED.updated_at`,
+        [x.id,x.member_no,x.company_name,x.category,x.expertise,x.website_url,x.social_url,x.created_at,x.updated_at]
+      );
+      result.socios++;
+    }
+    await secondaryPool.query(`INSERT INTO uic_bridge_meta(singleton,last_success_at,events_count,comms_count,socios_count)
+      VALUES(TRUE,NOW(),$1,$2,$3) ON CONFLICT(singleton) DO UPDATE SET
+      last_success_at=EXCLUDED.last_success_at,events_count=EXCLUDED.events_count,comms_count=EXCLUDED.comms_count,socios_count=EXCLUDED.socios_count`,
+      [result.events, result.comms, result.socios]);
+    console.log(`🔄 Sincronización secundaria OK · agenda=${result.events} comunicaciones=${result.comms} socios=${result.socios}`);
+    return { ok: true, ...result };
+  } catch (e) {
+    console.log("⚠️ syncCriticalToSecondary:", e?.message || e);
+    return { ok: false, error: String(e?.message || e) };
+  }
+}
+
+function safeDbIdentity() { return safeDbIdentityFrom(DATABASE_URL); }
 
 function markDbDown(err, context = "DB") {
   dbReady = false;
@@ -809,7 +994,7 @@ async function applySocioOverrides() {
 async function pruneDb() {
   const w = agendaWindowBounds();
 
-  // v0.37.1: la ventana de Agenda es sólo de visualización. Nunca borrar eventos por antigüedad.
+  // v0.37.2: la ventana de Agenda es sólo de visualización. Nunca borrar eventos por antigüedad.
   try {
     EVENTS_STORE.events = Array.isArray(EVENTS_STORE.events) ? EVENTS_STORE.events : [];
     EVENTS_STORE.events.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
@@ -1309,8 +1494,12 @@ app.get("/", (req, res) => {
 
 app.get("/health", async (req, res) => {
   const connected = await ensureDbConnection();
+  const secondaryConnected = await ensureSecondaryConnection();
+  const secondarySnapshot = secondaryConnected ? await secondarySnapshotReady() : false;
   const identity = safeDbIdentity();
+  const secondaryIdentity = safeDbIdentityFrom(SECONDARY_DATABASE_URL);
   let agendaCount = null;
+  let secondaryAgendaCount = null;
   if (connected) {
     try {
       const r = await pool.query("SELECT COUNT(*)::int AS count FROM uic_events");
@@ -1319,7 +1508,13 @@ app.get("/health", async (req, res) => {
       markDbDown(e, "health/agenda-count");
     }
   }
-  const ok = dbReady || !STRICT_DB_PERSISTENCE;
+  if (secondaryConnected) {
+    try {
+      const r2 = await secondaryPool.query("SELECT COUNT(*)::int AS count FROM uic_events");
+      secondaryAgendaCount = Number(r2.rows?.[0]?.count || 0);
+    } catch (e) { markSecondaryDown(e, "health/secondary-agenda-count"); }
+  }
+  const ok = dbReady || secondaryReady || !STRICT_DB_PERSISTENCE;
   const payload = {
     ok,
     apiVersion: API_VERSION,
@@ -1335,11 +1530,35 @@ app.get("/health", async (req, res) => {
       lastAttemptAt: dbLastAttemptAt,
       lastError: dbReady ? "" : dbLastError,
     },
-    agenda: { storage: "postgresql", count: agendaCount, protectedFromFallback: STRICT_DB_PERSISTENCE },
+    secondaryPersistence: {
+      configured: Boolean(SECONDARY_DATABASE_URL),
+      connected: Boolean(secondaryReady),
+      host: secondaryIdentity.host,
+      database: secondaryIdentity.database,
+      user: secondaryIdentity.user,
+      lastOkAt: secondaryLastOkAt,
+      lastAttemptAt: secondaryLastAttemptAt,
+      lastError: secondaryReady ? "" : secondaryLastError,
+    },
+    agenda: {
+      storage: dbReady ? "postgresql-primary" : (secondaryReady ? "postgresql-secondary-readonly" : "unavailable"),
+      count: dbReady ? agendaCount : secondaryAgendaCount,
+      primaryCount: agendaCount,
+      secondaryCount: secondaryAgendaCount,
+      protectedFromFallback: STRICT_DB_PERSISTENCE,
+      continuityEnabled: Boolean(SECONDARY_DATABASE_URL),
+      secondarySnapshotReady: Boolean(secondarySnapshot),
+    },
   };
   return res.status(ok ? 200 : 503).json(payload);
 });
 app.get("/version", (req, res) => res.json({ ok: true, apiVersion: API_VERSION, build: API_BUILD_STAMP }));
+app.post("/admin/sync-secondary", requireAdmin, async (req, res) => {
+  if (!(await ensureDbConnection())) return dbUnavailableResponse(res, "Base principal");
+  if (!(await ensureSecondaryConnection())) return res.status(503).json({ ok:false, code:"secondary_database_unavailable", error:"Base secundaria no disponible" });
+  const result = await syncCriticalToSecondary();
+  return res.status(result.ok ? 200 : 500).json(result);
+});
 
 /* ------------------------- WordPress (posts) ---------------------------- */
 
@@ -1411,7 +1630,19 @@ app.get("/wp/posts", async (req, res) => {
 
 app.get("/events/meta", async (req, res) => {
   const w = agendaWindowBounds();
-  if (STRICT_DB_PERSISTENCE && !(await ensureDbConnection())) return dbUnavailableResponse(res, "Agenda");
+  const primaryConnected = await ensureDbConnection();
+  if (!primaryConnected && (await secondarySnapshotReady())) {
+    try {
+      const r = await secondaryPool.query(
+        "SELECT COUNT(*)::int AS count, MAX(updated_at) AS updated_at FROM uic_events WHERE date >= $1 AND date <= $2",
+        [w.start, w.end]
+      );
+      const count = r.rows?.[0]?.count || 0;
+      const updatedAt = r.rows?.[0]?.updated_at ? new Date(r.rows[0].updated_at).toISOString() : "";
+      return res.json({ updatedAt, count, storage: "postgresql-secondary-readonly", degraded: true });
+    } catch (e) { markSecondaryDown(e, "DB secundaria events/meta"); }
+  }
+  if (STRICT_DB_PERSISTENCE && !primaryConnected) return dbUnavailableResponse(res, "Agenda");
   try {
     if (dbReady) {
       const r = await pool.query(
@@ -1434,8 +1665,26 @@ app.get("/events", async (req, res) => {
   const qTo = isoDateOnly((req.query.to || "").toString().trim());
   const { from, to, window } = clampRangeToWindow(qFrom, qTo);
 
-  if (STRICT_DB_PERSISTENCE && !(await ensureDbConnection())) return dbUnavailableResponse(res, "Agenda");
-  if (from && to && from > to) return res.json({ updatedAt: "", items: [], storage: dbReady ? "postgresql" : "local-fallback" });
+  const primaryConnected = await ensureDbConnection();
+  if (from && to && from > to) return res.json({ updatedAt: "", items: [], storage: primaryConnected ? "postgresql" : "postgresql-secondary-readonly" });
+
+  if (!primaryConnected && (await secondarySnapshotReady())) {
+    try {
+      const r = await secondaryPool.query(
+        "SELECT id, to_char(date,'YYYY-MM-DD') AS date, title, COALESCE(description,'') AS description, highlight, created_at, updated_at FROM uic_events WHERE date >= $1 AND date <= $2 ORDER BY date ASC",
+        [from, to]
+      );
+      const items = (r.rows || []).map((x) => ({
+        id: x.id, date: x.date, title: x.title, description: x.description || "", highlight: Boolean(x.highlight),
+        createdAt: x.created_at ? new Date(x.created_at).toISOString() : "",
+        updatedAt: x.updated_at ? new Date(x.updated_at).toISOString() : "",
+      }));
+      const meta = await secondaryPool.query("SELECT MAX(updated_at) AS updated_at FROM uic_events WHERE date >= $1 AND date <= $2", [window.start, window.end]);
+      const updatedAt = meta.rows?.[0]?.updated_at ? new Date(meta.rows[0].updated_at).toISOString() : "";
+      return res.json({ updatedAt, items, storage: "postgresql-secondary-readonly", degraded: true });
+    } catch (e) { markSecondaryDown(e, "DB secundaria events/list"); }
+  }
+  if (STRICT_DB_PERSISTENCE && !primaryConnected) return dbUnavailableResponse(res, "Agenda");
 
   try {
     if (dbReady) {
@@ -1483,7 +1732,9 @@ app.post("/events", requireAdmin, async (req, res) => {
         "INSERT INTO uic_events(id, date, title, description, highlight, created_at, updated_at) VALUES($1,$2,$3,$4,$5,NOW(),NOW())",
         [id, date, title, description, highlight]
       );
-      return res.status(201).json({ ok: true, item: { id, date, title, description, highlight, createdAt: now, updatedAt: now }, updatedAt: now, storage: "postgresql" });
+      const item = { id, date, title, description, highlight, createdAt: now, updatedAt: now };
+      void mirrorEventToSecondary(item);
+      return res.status(201).json({ ok: true, item, updatedAt: now, storage: "postgresql" });
     }
   } catch (e) {
     markDbDown(e, "DB events/create");
@@ -1517,7 +1768,9 @@ app.put("/events/:id", requireAdmin, async (req, res) => {
       if (!newTitle) return res.status(400).json({ error: "title requerido" });
       const now = new Date().toISOString();
       await pool.query("UPDATE uic_events SET date=$2, title=$3, description=$4, highlight=$5, updated_at=NOW() WHERE id=$1", [id, newDate, newTitle, newDesc, newHighlight]);
-      return res.json({ ok: true, item: { id, date: newDate, title: newTitle, description: newDesc, highlight: newHighlight, updatedAt: now }, updatedAt: now, storage: "postgresql" });
+      const item = { id, date: newDate, title: newTitle, description: newDesc, highlight: newHighlight, updatedAt: now };
+      void mirrorEventToSecondary(item);
+      return res.json({ ok: true, item, updatedAt: now, storage: "postgresql" });
     }
   } catch (e) {
     markDbDown(e, "DB events/update");
@@ -1546,6 +1799,7 @@ app.delete("/events/:id", requireAdmin, async (req, res) => {
       const r = await pool.query("DELETE FROM uic_events WHERE id=$1", [id]);
       if (!r.rowCount) return res.status(404).json({ error: "Evento no encontrado" });
       const now = new Date().toISOString();
+      void deleteEventFromSecondary(id);
       return res.json({ ok: true, updatedAt: now, storage: "postgresql" });
     }
   } catch (e) {
@@ -3188,7 +3442,7 @@ async function runDbMaintenance() {
 }
 
 async function start() {
-  await initDb();
+  await Promise.all([initDb(), initSecondaryDb()]);
   if (dbReady) await runDbMaintenance();
   else if (STRICT_DB_PERSISTENCE) console.log("🛡️ Modo persistencia estricta activo: Agenda NO usará JSON local mientras Neon esté caído.");
 
@@ -3196,9 +3450,11 @@ async function start() {
     console.log(`UIC API running on :${PORT}`);
     console.log(`WP_MODE=${WP_MODE} WP_SITE_BASE=${WP_SITE_BASE}`);
     console.log(`STRICT_DB_PERSISTENCE=${STRICT_DB_PERSISTENCE} DB_RETRY_MS=${DB_RETRY_MS}`);
+    console.log(`SECONDARY_DATABASE_URL=${SECONDARY_DATABASE_URL ? "configurada" : "no configurada"} SECONDARY_DB_CONNECTED=${secondaryReady}`);
   });
 
   const timer = setInterval(async () => {
+    if (SECONDARY_DATABASE_URL && !secondaryReady) await initSecondaryDb();
     if (!DATABASE_URL) return;
     if (dbReady) {
       await ensureDbConnection();
@@ -3208,6 +3464,12 @@ async function start() {
     if (recovered) await runDbMaintenance();
   }, DB_RETRY_MS);
   timer.unref?.();
+
+  const syncEveryMs = Math.max(parseInt(process.env.SECONDARY_SYNC_MS || "21600000", 10) || 21600000, 300000);
+  const syncTimer = setInterval(async () => {
+    if (dbReady && secondaryReady) await syncCriticalToSecondary();
+  }, syncEveryMs);
+  syncTimer.unref?.();
 }
 
 start();

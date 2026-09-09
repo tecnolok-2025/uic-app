@@ -1,6 +1,6 @@
 # UIC APP — Estado del proyecto (snapshot)
 
-**Release actual:** 0.37.1
+**Release actual:** 0.37.2
 
 ## Arquitectura
 - **PWA:** React + Vite + PWA (vite-plugin-pwa) — carpeta `uic-app-pwa/`
@@ -60,3 +60,12 @@
 - `/health` verifica realmente PostgreSQL, informa host/base/usuario sin exponer contraseña y cuenta total de eventos.
 - Los eventos históricos dejan de borrarse automáticamente por estar fuera de la ventana visual. La ventana es sólo de consulta.
 - `STRICT_DB_PERSISTENCE=true` recomendado/obligatorio en Render.
+
+## Cambios v0.37.2 — Dual Neon / UIC Data Bridge
+- Segundo proyecto Neon opcional mediante `SECONDARY_DATABASE_URL`.
+- `uic-data-bridge`: backend interno sin frontend para réplica de Agenda, Comunicaciones y Socios.
+- Primaria = única base maestra de escritura.
+- Secundaria = continuidad de lectura de Agenda.
+- La secundaria sólo se usa después de una sincronización completa validada en `uic_bridge_meta`.
+- Si la primaria vuelve a estar disponible, la App retorna automáticamente a lectura primaria.
+- Health check informa primaria/secundaria y validez del snapshot.

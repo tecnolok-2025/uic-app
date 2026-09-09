@@ -32,3 +32,12 @@
 - [ ] Con DB caída, alta/edición/borrado devuelve 503 y NO escribe JSON local
 - [ ] Restaurar DB: la conexión se recupera automáticamente sin redeploy
 - [ ] Confirmar que los eventos fuera de la ventana visual no se eliminan de Neon
+
+## Dual Neon / continuidad (v0.37.2+)
+- [ ] Crear segundo proyecto Neon y copiar su pooled connection string.
+- [ ] Configurar `SECONDARY_DATABASE_URL` en `uic-campana-api`.
+- [ ] Crear servicio Render `uic-data-bridge` con Root Directory `uic-data-bridge`.
+- [ ] Configurar `PRIMARY_DATABASE_URL`, `SECONDARY_DATABASE_URL` y `BRIDGE_TOKEN` en el bridge.
+- [ ] Confirmar `/health` API: `agenda.continuityEnabled=true`.
+- [ ] Luego de la primera sincronización, confirmar `agenda.secondarySnapshotReady=true`.
+- [ ] Simular caída primaria sólo después de validar que la secundaria tiene eventos.

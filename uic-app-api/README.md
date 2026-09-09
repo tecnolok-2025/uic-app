@@ -16,3 +16,8 @@ Variables principales: `DATABASE_URL`, `STRICT_DB_PERSISTENCE=true`, `DB_RETRY_M
 ## Ejecución
 - Instalar: `npm install`
 - Iniciar: `npm start`
+
+## v0.37.2 — Segundo Neon de continuidad
+Configurar `SECONDARY_DATABASE_URL` para habilitar respaldo de lectura de Agenda. La secundaria nunca reemplaza a la primaria como base maestra. Si la primaria cae, sólo se utiliza la secundaria cuando existe un snapshot previamente validado por `uic_bridge_meta`.
+
+El servicio complementario `uic-data-bridge` realiza la copia de Agenda, Comunicaciones y Socios. Mientras la primaria esté bloqueada por cuota, el bridge esperará y reintentará; no mostrará como válida una base secundaria vacía.
